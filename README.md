@@ -141,4 +141,3 @@ Nasceu como [protótipo de IHC](prototipo-referencia/) ([online](https://erik-ga
 ## 👥 Autores
 
 - **Erik Gastão Tavares** — [@erik-gastao](https://github.com/erik-gastao)
-- **Ana Luisa** — [@cCarpa25](https://github.com/cCarpa25)
