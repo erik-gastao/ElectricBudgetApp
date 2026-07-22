@@ -1433,10 +1433,6 @@ function renderPayHome() {
 }
 
 function renderRelatorio() {
-  var hoje = new Date();
-  var lbl = document.getElementById('rel-mes-label');
-  if (lbl) lbl.textContent = 'RESUMO – ' + _meses[hoje.getMonth()] + ' ' + hoje.getFullYear();
-
   var faturado = 0, aberto = 0, pagos = 0;
   pagamentos.forEach(function(p) {
     if (p.status === 'pago') { faturado += p.valor; pagos++; }
@@ -1446,6 +1442,43 @@ function renderRelatorio() {
   var el2 = document.getElementById('rel-aberto');        if (el2) el2.textContent = fmtBR(aberto);
   var el3 = document.getElementById('rel-orc-count');     if (el3) el3.textContent = pagamentos.length;
   var el4 = document.getElementById('rel-orc-aprovados'); if (el4) el4.textContent = pagos;
+
+  /* orçamentos: total + "serviços perdidos" = recusados (SPEC §8.1) */
+  var el5 = document.getElementById('rel-orcs');
+  if (el5) el5.textContent = orcamentos.length;
+  var el6 = document.getElementById('rel-perdidos');
+  if (el6) el6.textContent = orcamentos.filter(function(o) { return o.status === 'recusado'; }).length;
+
+  /* RECEITA MENSAL — últimos 6 meses, soma de pagos por mês de recebimento */
+  var chart = document.getElementById('rel-bar-chart');
+  if (chart) {
+    var agora = new Date();
+    var p2 = function(n) { return String(n).padStart(2, '0'); };
+    var mesesChart = [];
+    for (var i = 5; i >= 0; i--) {
+      var m = new Date(agora.getFullYear(), agora.getMonth() - i, 1);
+      mesesChart.push({
+        prefixo: m.getFullYear() + '-' + p2(m.getMonth() + 1),
+        label: _meses[m.getMonth()].slice(0, 3),
+        atual: i === 0,
+        total: 0
+      });
+    }
+    pagamentos.forEach(function(p) {
+      if (p.status !== 'pago' || !p.dataPagamento) return;
+      mesesChart.forEach(function(mc) {
+        if (p.dataPagamento.indexOf(mc.prefixo) === 0) mc.total += p.valor;
+      });
+    });
+    var maxMes = Math.max.apply(null, mesesChart.map(function(m) { return m.total; }).concat([1]));
+    chart.innerHTML = mesesChart.map(function(mc) {
+      var pct = Math.round(mc.total / maxMes * 100);
+      return '<div class="bar-item" title="' + mc.label + ': ' + fmtBR(mc.total) + '">'
+        + '<div class="bar-fill' + (mc.atual ? ' current' : '') + '" style="height:' + pct + '%"></div>'
+        + '<div class="bar-label">' + mc.label + '</div>'
+        + '</div>';
+    }).join('');
+  }
 
   /* TOP CLIENTES por total pago */
   var porCliente = {};
