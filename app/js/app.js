@@ -1863,7 +1863,7 @@ function renderPayHome() {
   if (!list) return;
   var pendentes = pagamentos.filter(function(p) { return statusPagamento(p) !== 'pago'; });
   var totalReceber = pendentes.reduce(function(s, p) { return s + p.valor; }, 0);
-  var html = '<div class="pay-home-card today"><span class="pnome">A RECEBER:</span><span class="pvalor">' + fmtBR(totalReceber) + '</span></div>';
+  var html = '<div class="pay-home-card today" onclick="goTo(\'screen-pagamentos\')" role="button" aria-label="Ver pagamentos a receber"><span class="pnome">A RECEBER:</span><span class="pvalor">' + fmtBR(totalReceber) + '</span></div>';
   pendentes.slice(0, 2).forEach(function(p) {
     html += '<div class="pay-home-card" onclick="goTo(\'screen-pagamentos\')" role="button"><span class="pnome">' + esc(clienteNome(p.clienteId)) + '</span><span class="pvalor">' + fmtBR(p.valor) + '</span></div>';
   });
