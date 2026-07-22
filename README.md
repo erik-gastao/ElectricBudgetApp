@@ -38,7 +38,8 @@ Eletricista autônomo gerencia o negócio em caderno e planilha: orçamento feit
 - **Agenda** — calendário mensal interativo, compromissos agrupados por dia com labels "HOJE"/"AMANHÃ"
 - **Clientes** — cadastro completo, perfil com financeiro (faturado × em aberto) e histórico de orçamentos
 - **Materiais** — catálogo com busca, filtro por categoria e edição in-place
-- **Relatório** — faturado, em aberto e ranking de clientes
+- **Relatório** — faturado, em aberto, receita mensal em gráfico e ranking de clientes
+- **Notificações** — central com atrasos, vencimentos e compromissos do dia; badge no sino; **cobrança pelo WhatsApp** com mensagem pronta
 - **Busca global** — clientes, serviços, materiais e agendamentos num campo só
 
 ## 📱 Instalar no celular
@@ -131,7 +132,7 @@ Suíte E2E com Puppeteer + Chrome real cobrindo: seed e hidratação, CRUDs, flu
 - [x] **F3** — PDF real do orçamento (jsPDF offline)
 - [x] **F4** — manifest + service worker → instalável e offline
 - [x] **F5** — relatório completo (gráfico real de receita mensal)
-- [ ] **F6** — notificações (lembrete de agenda, cobrança)
+- [x] **F6** — notificações (central dinâmica, cobrança via WhatsApp, Notification API)
 - [ ] **F7** — Capacitor → Play Store
 
 ## 🎨 Origem

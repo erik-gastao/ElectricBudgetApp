@@ -925,3 +925,15 @@
       box-shadow: none;
     }
   }
+
+  /* BADGE DO SINO (F6) */
+  .bell-icon { position: relative; }
+  .bell-count {
+    position: absolute; top: -4px; right: -6px;
+    background: #ef4444; color: #fff;
+    border-radius: 10px; min-width: 16px; height: 16px;
+    font-size: 10px; font-weight: 800; line-height: 1;
+    display: none; align-items: center; justify-content: center;
+    padding: 0 4px; border: 2px solid var(--surface);
+  }
+  .bell-count.show { display: flex; }

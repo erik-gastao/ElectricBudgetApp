@@ -398,12 +398,201 @@ function marcarPago(id) {
   });
 }
 
-/* COBRAR não muda status — só avisa (stub até fase de notificações) */
-function cobrarPagamento(id) {
-  showToast('Cobrança via WhatsApp/PIX chega na fase de notificações.');
+/* COBRAR não muda status — só avisa o cliente via WhatsApp (SPEC §8.1) */
+function telefoneWhatsApp(tel) {
+  var digitos = String(tel || '').replace(/\D/g, '');
+  if (!digitos) return null;
+  /* número BR sem código do país (até 11 dígitos: DDD + 9 dígitos) → prefixa 55 */
+  if (digitos.length <= 11) digitos = '55' + digitos;
+  return digitos;
 }
+
+function cobrarPagamento(id) {
+  var p = pagamentoById(id);
+  if (!p) return;
+  var c = clienteById(p.clienteId);
+  var fone = c ? telefoneWhatsApp(c.telefone) : null;
+  if (!fone) {
+    showToast('Cliente sem telefone cadastrado.');
+    return;
+  }
+  var parts = (p.dataVencimento || '').split('-');
+  var vencFmt = parts.length === 3 ? parts[2] + '/' + parts[1] + '/' + parts[0] : '';
+  var atrasado = statusPagamento(p) === 'atrasado';
+  var msg = 'Olá, ' + (c.nome.split(' ')[0]) + '! '
+    + (atrasado
+        ? 'Passando para lembrar do pagamento de ' + fmtBR(p.valor) + ' referente a "' + p.servico + '", vencido em ' + vencFmt + '. '
+        : 'Segue a cobrança de ' + fmtBR(p.valor) + ' referente a "' + p.servico + '", com vencimento em ' + vencFmt + '. ')
+    + 'Qualquer dúvida estou à disposição. Obrigado!';
+  window.open('https://wa.me/' + fone + '?text=' + encodeURIComponent(msg), '_blank');
+}
+
 function verRecibo(id) {
   showToast('Recibo em PDF chega na fase de PDF.');
+}
+
+/* ================================================================
+   NOTIFICAÇÕES (F6)
+   Derivadas do estado — nada persistido, recalcula a cada render.
+   ================================================================ */
+
+function listaNotificacoes() {
+  var hoje = hojeLocal();
+  var itens = [];
+
+  /* pagamentos atrasados */
+  pagamentos.forEach(function(p) {
+    if (statusPagamento(p) !== 'atrasado') return;
+    var dias = Math.round((new Date(hoje) - new Date(p.dataVencimento)) / 86400000);
+    itens.push({
+      dot: 'late', grupo: 'HOJE',
+      titulo: 'Pagamento atrasado – ' + clienteNome(p.clienteId),
+      sub: fmtBR(p.valor) + ' · Venceu há ' + dias + (dias === 1 ? ' dia' : ' dias'),
+      acao: "goTo('screen-pagamentos')"
+    });
+  });
+
+  /* compromissos de hoje */
+  agendamentos.forEach(function(a) {
+    if (a.data !== hoje) return;
+    itens.push({
+      dot: 'agenda', grupo: 'HOJE',
+      titulo: 'Compromisso hoje às ' + a.hora,
+      sub: a.cliente + ' · ' + a.desc,
+      acao: "abrirDetalheAgendamento('" + a.id + "')"
+    });
+  });
+
+  /* pendentes vencendo em até 3 dias */
+  pagamentos.forEach(function(p) {
+    if (statusPagamento(p) !== 'pendente' || !p.dataVencimento) return;
+    var dias = Math.round((new Date(p.dataVencimento) - new Date(hoje)) / 86400000);
+    if (dias < 0 || dias > 3) return;
+    itens.push({
+      dot: 'pay', grupo: dias === 0 ? 'HOJE' : 'PRÓXIMOS DIAS',
+      titulo: dias === 0 ? 'Pagamento vence hoje – ' + clienteNome(p.clienteId)
+                         : 'Pagamento vence em ' + dias + (dias === 1 ? ' dia – ' : ' dias – ') + clienteNome(p.clienteId),
+      sub: fmtBR(p.valor) + ' · ' + p.servico,
+      acao: "goTo('screen-pagamentos')"
+    });
+  });
+
+  /* orçamentos aguardando resposta */
+  orcamentos.forEach(function(o) {
+    if (o.status !== 'enviado') return;
+    itens.push({
+      dot: 'orc', grupo: 'PRÓXIMOS DIAS',
+      titulo: 'Orçamento aguardando resposta – ' + clienteNome(o.clienteId),
+      sub: fmtBR(o.total) + ' · enviado em ' + o.data.split('-').reverse().join('/'),
+      acao: "abrirOrcDetalhe('" + o.id + "')"
+    });
+  });
+
+  return itens;
+}
+
+function renderNotificacoes() {
+  var list = document.getElementById('notif-list');
+  if (!list) return;
+  var itens = listaNotificacoes();
+  if (itens.length === 0) {
+    list.innerHTML = '<div class="empty-state">Tudo em dia!<br/>Nenhuma notificação no momento.</div>';
+    return;
+  }
+  var html = '', grupoAtual = null;
+  ['HOJE', 'PRÓXIMOS DIAS'].forEach(function(grupo) {
+    itens.filter(function(n) { return n.grupo === grupo; }).forEach(function(n) {
+      if (grupo !== grupoAtual) {
+        html += '<div class="notif-group-label">' + grupo + '</div>';
+        grupoAtual = grupo;
+      }
+      html += '<div class="notif-item" onclick="' + n.acao + '" role="button">'
+        + '<div class="notif-dot ' + n.dot + '"></div>'
+        + '<div class="notif-content">'
+        + '<div class="notif-title">' + esc(n.titulo) + '</div>'
+        + '<div class="notif-sub">' + esc(n.sub) + '</div>'
+        + '</div></div>';
+    });
+  });
+  list.innerHTML = html;
+}
+
+function atualizarBadgeSino() {
+  var badge = document.getElementById('bell-count');
+  if (!badge) return;
+  var n = listaNotificacoes().length;
+  badge.textContent = n > 9 ? '9+' : String(n);
+  badge.classList.toggle('show', n > 0);
+}
+
+/* ── Notification API local (respeita toggles do perfil) ──
+   Sem servidor de push: dispara com o app aberto. Push real na F7. */
+
+function podeNotificar() {
+  return 'Notification' in window && Notification.permission === 'granted';
+}
+
+function notificar(titulo, corpo, tag) {
+  if (!podeNotificar()) return;
+  try {
+    new Notification(titulo, { body: corpo, icon: 'icons/icon-192.png', tag: tag });
+  } catch (e) { console.error('notification', e); }
+}
+
+function lerToggle(chave) {
+  if (!_dbOk) return Promise.resolve(null);
+  return dbGet('preferencias', 'toggle-' + chave).then(function(p) {
+    return p ? !!p.value : null; /* null = usa default visual do HTML */
+  }).catch(function() { return null; });
+}
+
+function dispararNotificacoesLocais() {
+  if (!('Notification' in window)) return;
+  var hoje = hojeLocal();
+
+  /* atrasados — 1 aviso por dia (toggle 'Avisos de pagamento atrasado') */
+  lerToggle('notif-atraso').then(function(on) {
+    if (on !== true || !podeNotificar()) return; /* default do toggle é OFF */
+    var atrasados = pagamentos.filter(function(p) { return statusPagamento(p) === 'atrasado'; });
+    if (atrasados.length === 0) return;
+    dbGet('preferencias', 'notifAtrasoDia').then(function(pref) {
+      if (pref && pref.value === hoje) return;
+      var total = atrasados.reduce(function(s, p) { return s + p.valor; }, 0);
+      notificar('Pagamentos atrasados', atrasados.length + ' pagamento(s) somando ' + fmtBR(total), 'atraso');
+      dbPut('preferencias', { key: 'notifAtrasoDia', value: hoje }).catch(function() {});
+    }).catch(function() {});
+  });
+
+  /* vencendo hoje (toggle 'Notificações de pagamento', default ON) */
+  lerToggle('notif-pagamento').then(function(on) {
+    if (on === false || !podeNotificar()) return;
+    var vencemHoje = pagamentos.filter(function(p) {
+      return statusPagamento(p) === 'pendente' && p.dataVencimento === hoje;
+    });
+    if (vencemHoje.length === 0) return;
+    dbGet('preferencias', 'notifVenceDia').then(function(pref) {
+      if (pref && pref.value === hoje) return;
+      notificar('Pagamento vence hoje', vencemHoje.map(function(p) { return clienteNome(p.clienteId); }).join(', '), 'vence');
+      dbPut('preferencias', { key: 'notifVenceDia', value: hoje }).catch(function() {});
+    }).catch(function() {});
+  });
+
+  /* lembrete 1h antes dos compromissos de hoje (toggle default ON) */
+  lerToggle('notif-agenda').then(function(on) {
+    if (on === false || !podeNotificar()) return;
+    var agora = new Date();
+    agendamentos.forEach(function(a) {
+      if (a.data !== hoje) return;
+      var hm = a.hora.split(':');
+      var quando = new Date(agora.getFullYear(), agora.getMonth(), agora.getDate(),
+        parseInt(hm[0]), parseInt(hm[1]));
+      var msAte = quando.getTime() - 3600000 - agora.getTime(); /* 1h antes */
+      if (msAte < 0 || msAte > 12 * 3600000) return;
+      setTimeout(function() {
+        notificar('Compromisso em 1 hora', a.cliente + ' · ' + a.desc + ' às ' + a.hora, 'ag-' + a.id);
+      }, msAte);
+    });
+  });
 }
 
 /* ================================================================
@@ -1574,7 +1763,8 @@ function goTo(id) {
   el.classList.add('active');
   var sb = el.querySelector('.scroll-body');
   if (sb) sb.scrollTop = 0;
-  if (id === 'screen-home') { renderHomeAgenda(); renderPayHome(); }
+  if (id === 'screen-home') { renderHomeAgenda(); renderPayHome(); atualizarBadgeSino(); }
+  if (id === 'screen-notificacoes') renderNotificacoes();
   if (id === 'screen-relatorio') renderRelatorio();
   if (id === 'screen-orcamento') renderOrcamento();
   if (id === 'screen-picker-material') renderPickerMaterial();
@@ -1591,9 +1781,17 @@ function history_back() {
 function toggleSwitch(el) {
   el.classList.toggle('on');
   var key = el.getAttribute('data-key');
+  var ligado = el.classList.contains('on');
   if (key && _dbOk) {
-    dbPut('preferencias', { key: 'toggle-' + key, value: el.classList.contains('on') })
+    dbPut('preferencias', { key: 'toggle-' + key, value: ligado })
       .catch(function(e) { console.error('toggle', e); });
+  }
+  /* ligou toggle de notificação → pede permissão do navegador (F6) */
+  if (ligado && key && key.indexOf('notif-') === 0
+      && 'Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission().then(function(perm) {
+      if (perm === 'granted') showToast('Notificações ativadas!');
+    }).catch(function() {});
   }
 }
 
@@ -1661,8 +1859,10 @@ openDB().then(function() {
   fillClienteSelects();
   renderHomeAgenda();
   renderPayHome();
+  atualizarBadgeSino();
   aplicarToggles();
   verificarRelogio();
+  dispararNotificacoesLocais();
 });
 
 /* ── SERVICE WORKER (F4 — offline/instalável) ── */
