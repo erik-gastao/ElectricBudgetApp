@@ -9,7 +9,8 @@
 Feito para o celular na mão, no meio da obra, com ou sem internet.
 
 [![Demo](https://img.shields.io/badge/▶_demo_ao_vivo-erik--gastao.github.io-1e3a5f?style=for-the-badge)](https://erik-gastao.github.io/ElectricBudgetApp/)
-[![PWA](https://img.shields.io/badge/PWA-instalável-D9890A?style=for-the-badge)](#-instalar-no-celular)
+[![APK](https://img.shields.io/github/v/release/erik-gastao/ElectricBudgetApp?label=⬇_baixar_APK&style=for-the-badge&color=D9890A)](https://github.com/erik-gastao/ElectricBudgetApp/releases/latest)
+[![PWA](https://img.shields.io/badge/PWA-instalável-1e3a5f?style=for-the-badge)](#-instalar-no-celular)
 [![Offline](https://img.shields.io/badge/offline-first-22c55e?style=for-the-badge)](#-arquitetura)
 
 <br>
@@ -45,6 +46,9 @@ Eletricista autônomo gerencia o negócio em caderno e planilha: orçamento feit
 
 ## 📱 Instalar no celular
 
+**Opção A — APK (Android):** baixe o `.apk` na [página de Releases](https://github.com/erik-gastao/ElectricBudgetApp/releases/latest), abra no aparelho e autorize a instalação. App nativo via Capacitor.
+
+**Opção B — PWA (qualquer aparelho):**
 1. Abra **https://erik-gastao.github.io/ElectricBudgetApp/** no Chrome
 2. Menu **⋮** → **"Adicionar à tela inicial"** (ou "Instalar app")
 3. Pronto: abre pelo ícone ⚡ em tela cheia e **funciona sem internet**
@@ -134,7 +138,7 @@ Suíte E2E com Puppeteer + Chrome real cobrindo: seed e hidratação, CRUDs, flu
 - [x] **F4** — manifest + service worker → instalável e offline
 - [x] **F5** — relatório completo (gráfico real de receita mensal)
 - [x] **F6** — notificações (central dinâmica, cobrança via WhatsApp, Notification API)
-- [ ] **F7** — Capacitor → Play Store
+- [x] **F7** — Capacitor → APK Android nas [Releases](https://github.com/erik-gastao/ElectricBudgetApp/releases) (build automático por tag)
 
 ## 🎨 Origem
 
