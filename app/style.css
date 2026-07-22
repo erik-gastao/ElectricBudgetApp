@@ -954,3 +954,14 @@
     margin-left: -10px; padding: 0;
   }
   .back-btn svg { width: 26px; height: 26px; display: block; }
+
+  /* EXCLUIR DIRETO NA LISTA DA AGENDA */
+  .agenda-event-row { position: relative; }
+  .ag-del-btn {
+    background: none; border: none; color: #c4b49a;
+    font-size: 16px; line-height: 1; cursor: pointer;
+    min-width: 36px; min-height: 36px; flex-shrink: 0;
+    align-self: center; border-radius: 8px; transition: color .12s, background .12s;
+  }
+  .ag-del-btn:hover { color: #ef4444; background: #fef2f2; }
+  .agenda-event-info { flex: 1; }

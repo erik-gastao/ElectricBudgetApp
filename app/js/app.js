@@ -703,10 +703,28 @@ function renderAgenda() {
         + '<div class="agenda-event-info">'
         + '<div class="ev-desc">' + esc(a.desc) + '</div>'
         + '<div class="ev-cli">' + esc(a.cliente) + '</div>'
-        + '</div></div>';
+        + '</div>'
+        + '<button class="ag-del-btn" aria-label="Excluir compromisso" '
+        + 'onclick="event.stopPropagation();excluirAgendamento(\'' + a.id + '\')">✕</button>'
+        + '</div>';
     });
   });
   container.innerHTML = html;
+}
+
+/* Excluir direto da lista da agenda (com confirmação) */
+function excluirAgendamento(id) {
+  var a = agendamentoById(id);
+  if (!a) return;
+  showConfirm('Excluir "' + a.desc + '" de ' + a.cliente + '? Esta ação não pode ser desfeita.', function() {
+    agendamentos = agendamentos.filter(function(x) { return x.id !== id; });
+    if (_agendamentoId === id) _agendamentoId = null;
+    persistDelete('agendamentos', id, function() {
+      showToast('Compromisso excluído.');
+      renderCalendar();
+      renderAgenda();
+    });
+  });
 }
 
 function renderHomeAgenda() {

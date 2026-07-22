@@ -5,7 +5,7 @@
    precisa ir à rede pra ler um header Date confiável.
    ================================================================ */
 
-var CACHE = 'electricbudget-v7';
+var CACHE = 'electricbudget-v8';
 
 var ASSETS = [
   './',
