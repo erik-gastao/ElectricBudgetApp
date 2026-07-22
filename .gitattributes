@@ -1,0 +1,5 @@
+# binários nunca sofrem conversão de linha
+*.png binary
+*.pdf binary
+*.ico binary
+*.jpg binary
