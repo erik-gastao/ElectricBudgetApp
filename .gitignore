@@ -4,3 +4,9 @@
 # dependências e temporários
 node_modules/
 *.log
+
+# Capacitor / Android — projeto nativo é gerado no CI, não versionado
+android/
+package-lock.json
+.gradle/
+*.apk

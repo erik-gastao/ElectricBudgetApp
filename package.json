@@ -1,0 +1,19 @@
+{
+  "name": "electric-budget",
+  "version": "1.0.0",
+  "description": "App de gestão para eletricistas autônomos — empacotamento Android via Capacitor.",
+  "private": true,
+  "scripts": {
+    "cap:add": "cap add android",
+    "cap:sync": "cap sync android",
+    "assets": "capacitor-assets generate --android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.2.0",
+    "@capacitor/core": "^6.2.0"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^6.2.0"
+  }
+}
