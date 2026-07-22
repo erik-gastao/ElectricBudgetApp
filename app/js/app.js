@@ -807,11 +807,11 @@ function abrirDetalheAgendamento(id) {
 function cancelarAgendamento() {
   if (!_agendamentoId) return;
   var id = _agendamentoId;
-  showConfirm('Cancelar este agendamento? Esta ação não pode ser desfeita.', function() {
+  showConfirm('Excluir este agendamento? Esta ação não pode ser desfeita.', function() {
     agendamentos = agendamentos.filter(function(a) { return a.id !== id; });
     _agendamentoId = null;
     persistDelete('agendamentos', id, function() {
-      showToast('Agendamento cancelado.');
+      showToast('Agendamento excluído.');
       goTo('screen-agenda');
     });
   });
