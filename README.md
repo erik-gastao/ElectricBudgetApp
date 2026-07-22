@@ -130,7 +130,7 @@ Suíte E2E com Puppeteer + Chrome real cobrindo: seed e hidratação, CRUDs, flu
 - [x] **F2** — CRUD real de clientes com `clienteId`
 - [x] **F3** — PDF real do orçamento (jsPDF offline)
 - [x] **F4** — manifest + service worker → instalável e offline
-- [ ] **F5** — relatório completo (gráfico real de receita mensal)
+- [x] **F5** — relatório completo (gráfico real de receita mensal)
 - [ ] **F6** — notificações (lembrete de agenda, cobrança)
 - [ ] **F7** — Capacitor → Play Store
 
