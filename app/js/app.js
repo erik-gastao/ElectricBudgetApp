@@ -28,6 +28,12 @@ function fmtBR(v) {
   return 'R$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+/* arredonda pra centavos — evita erro de float acumulado em valores
+   monetários persistidos (SPEC §4/§8: nunca float impreciso) */
+function round2(v) {
+  return Math.round((Number(v) + Number.EPSILON) * 100) / 100;
+}
+
 function esc(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -390,7 +396,8 @@ function marcarPago(id) {
   showConfirm('Confirmar recebimento de ' + fmtBR(p.valor) + ' de ' + clienteNome(p.clienteId) + '?', function() {
     p.status = 'pago';
     p.dataPagamento = hojeLocal();
-    p.forma = p.forma || 'PIX';
+    /* não fabrica forma: se veio de orçamento aprovado forma é null,
+       e o recibo apenas omite o método em vez de mentir 'PIX' */
     persistPut('pagamentos', p, function() {
       showToast('Pagamento recebido!');
       renderPagamentos(); renderPaySummary();
@@ -1058,7 +1065,7 @@ function renderClientes() {
 
   list.innerHTML = items.map(function(c) {
     return '<div class="cliente-row" onclick="abrirPerfilCliente(\'' + c.id + '\')">'
-      + '<div class="avatar">' + iniciais(c.nome) + '</div>'
+      + '<div class="avatar">' + esc(iniciais(c.nome)) + '</div>'
       + '<div class="cliente-info"><div class="cnome">' + esc(c.nome) + '</div><div class="ccel">' + esc(c.telefone) + '</div></div>'
       + '</div>';
   }).join('');
@@ -1228,11 +1235,11 @@ function orcamentoById(id) {
   return null;
 }
 
-/* Total SEMPRE revalidado dos itens (SPEC §4/§8) */
+/* Total SEMPRE revalidado dos itens (SPEC §4/§8), em centavos exatos */
 function totalOrcamento(o) {
-  var tm = o.materiais.reduce(function(s, m) { return s + m.preco * m.qty; }, 0);
-  var tb = o.maoDeObra.reduce(function(s, m) { return s + m.valor; }, 0);
-  return tm + tb;
+  var tm = o.materiais.reduce(function(s, m) { return s + round2(m.preco * m.qty); }, 0);
+  var tb = o.maoDeObra.reduce(function(s, m) { return s + Number(m.valor); }, 0);
+  return round2(tm + tb);
 }
 
 function resumoOrcamento(o) {
@@ -1333,7 +1340,7 @@ function renderPickerMaterial() {
     return '<div class="mat-row" style="align-items:center;">'
       + '<div><div class="mat-nome">' + esc(m.nome) + '</div><div class="mat-unit">' + preco + ' / ' + unit + '</div></div>'
       + '<div style="display:flex;align-items:center;gap:6px;">'
-      + '<input id="pqty-' + m.id + '" type="number" min="1" value="1" aria-label="Quantidade" style="width:50px;padding:4px 6px;border:1.5px solid #d0d0d0;border-radius:6px;font-size:13px;text-align:center;">'
+      + '<input id="pqty-' + m.id + '" type="number" min="1" max="99999" value="1" aria-label="Quantidade" style="width:50px;padding:4px 6px;border:1.5px solid #d0d0d0;border-radius:6px;font-size:13px;text-align:center;">'
       + '<button onclick="adicionarMatOrc(\'' + m.id + '\')" style="background:#1e3a5f;color:#fff;border:none;border-radius:6px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;">ADD</button>'
       + '</div></div>';
   }).join('');
@@ -1344,7 +1351,7 @@ function adicionarMatOrc(id) {
   var m = materialById(id);
   if (!m) return;
   var qtyEl = document.getElementById('pqty-' + id);
-  var qty = parseInt(qtyEl ? qtyEl.value : 1);
+  var qty = parseInt(qtyEl ? qtyEl.value : 1, 10);
   if (isNaN(qty) || qty <= 0) qty = 1;
   var existing = null;
   orcamentoAtual.materiais.forEach(function(x) { if (x.materialId === id) existing = x; });
@@ -1803,30 +1810,46 @@ function recusarOrcamento() {
   });
 }
 
-/* APROVAR: pede vencimento e gera Pagamento pendente (SPEC §8.1) */
+/* APROVAR: pede vencimento e gera Pagamento pendente (SPEC §8.1).
+   Orçamento (aprovado) e Pagamento gravam numa ÚNICA transação —
+   nunca sobra orçamento aprovado sem cobrança (ou vice-versa).
+   Memória só muda depois do commit; se falhar, nada é alterado. */
 function aprovarOrcamento() {
   var o = orcamentoById(_orcDetalheId);
   if (!o || o.status !== 'enviado') return;
   showVencModal(function(dataVencimento) {
-    o.status = 'aprovado';
-    o.total = totalOrcamento(o); /* revalida antes de cobrar */
-    persistPut('orcamentos', o, function() {
-      var pag = {
-        id: novoId(),
-        clienteId: o.clienteId,
-        orcamentoId: o.id,
-        servico: resumoOrcamento(o),
-        valor: o.total,
-        status: 'pendente',
-        forma: null,
-        dataVencimento: dataVencimento,
-        dataPagamento: null
-      };
+    var oAprovado = Object.assign({}, o, { status: 'aprovado', total: totalOrcamento(o) });
+    var pag = {
+      id: novoId(),
+      clienteId: o.clienteId,
+      orcamentoId: o.id,
+      servico: resumoOrcamento(o),
+      valor: oAprovado.total,
+      status: 'pendente',
+      forma: null,
+      dataVencimento: dataVencimento,
+      dataPagamento: null
+    };
+    if (!_dbOk) {
+      /* sem persistência: aplica em memória e avisa (SPEC §7.1) */
+      o.status = 'aprovado'; o.total = oAprovado.total;
       pagamentos.unshift(pag);
-      persistPut('pagamentos', pag, function() {
-        showToast('Orçamento aprovado — pagamento pendente criado!');
-        renderOrcDetalhe();
-      });
+      showToast('Armazenamento indisponível — alteração não será salva.');
+      renderOrcDetalhe();
+      return;
+    }
+    dbPutMany([
+      { store: 'orcamentos', obj: oAprovado },
+      { store: 'pagamentos', obj: pag }
+    ]).then(function() {
+      o.status = 'aprovado';
+      o.total = oAprovado.total;
+      pagamentos.unshift(pag);
+      showToast('Orçamento aprovado — pagamento pendente criado!');
+      renderOrcDetalhe();
+    }).catch(function(e) {
+      console.error('aprovar', e);
+      showToast(ERRO_SALVAR);
     });
   });
 }
