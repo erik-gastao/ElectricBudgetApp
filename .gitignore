@@ -1,0 +1,6 @@
+# pessoal / local
+.claude/settings.local.json
+
+# dependências e temporários
+node_modules/
+*.log
