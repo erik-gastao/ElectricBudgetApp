@@ -1466,3 +1466,9 @@ openDB().then(function() {
   aplicarToggles();
   verificarRelogio();
 });
+
+/* ── SERVICE WORKER (F4 — offline/instalável) ── */
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js')
+    .catch(function(e) { console.error('service worker:', e); });
+}

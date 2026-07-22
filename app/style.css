@@ -913,3 +913,15 @@
 
   /* MODAL DATA DE VENCIMENTO (fluxo APROVAR — §8.1 SPEC) */
   .venc-input { width: 100%; border: 1.5px solid #e5d4b8; border-radius: 10px; padding: 10px 14px; font-size: 14px; color: var(--ink); outline: none; background: #fff; margin-bottom: 16px; font-family: inherit; }
+
+  /* CELULAR: app ocupa a tela toda (instalado via PWA) */
+  @media (max-width: 480px) {
+    body { padding: 0; }
+    .phone {
+      height: 100vh; height: 100dvh;
+      width: 100vw; max-width: none;
+      aspect-ratio: auto;
+      border-radius: 0;
+      box-shadow: none;
+    }
+  }
