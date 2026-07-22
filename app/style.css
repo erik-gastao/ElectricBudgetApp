@@ -946,3 +946,11 @@
     background: #fff; color: #ef4444; cursor: pointer; transition: background .12s;
   }
   .excluir-btn:hover { background: #fef2f2; }
+
+  /* SETAS DE VOLTAR — chevron SVG grosso + area de toque 40px */
+  .back-btn {
+    display: flex; align-items: center; justify-content: center;
+    min-width: 40px; min-height: 40px;
+    margin-left: -10px; padding: 0;
+  }
+  .back-btn svg { width: 26px; height: 26px; display: block; }
