@@ -1142,31 +1142,57 @@ function abrirPerfilPorNome(nome) {
   }
 }
 
-/* Excluir cliente (F6.5) — bloqueia se houver histórico financeiro;
-   agendamentos do cliente saem junto (cascata confirmada) */
+/* Excluir cliente — cascata completa com aviso explícito.
+   Leva junto orçamentos, pagamentos e agendamentos do cliente
+   (nada fica órfão), tudo numa ÚNICA transação atômica. */
 function excluirCliente() {
   var c = clienteById(_perfilClienteId);
   if (!c) return;
-  var temFinanceiro = pagamentos.some(function(p) { return p.clienteId === c.id; })
-    || orcamentos.some(function(o) { return o.clienteId === c.id; });
-  if (temFinanceiro) {
-    showToast('Cliente com orçamentos ou pagamentos não pode ser excluído.');
-    return;
-  }
+
+  var orcsDoCliente = orcamentos.filter(function(o) { return o.clienteId === c.id; });
+  var pagsDoCliente = pagamentos.filter(function(p) { return p.clienteId === c.id; });
   var agsDoCliente = agendamentos.filter(function(a) { return a.cliente === c.nome; });
-  var msg = 'Excluir ' + c.nome + '?'
-    + (agsDoCliente.length > 0 ? ' ' + agsDoCliente.length + ' agendamento(s) dele também serão removidos.' : '')
-    + ' Esta ação não pode ser desfeita.';
+  var pendentes = pagsDoCliente.filter(function(p) { return statusPagamento(p) !== 'pago'; });
+
+  var partes = [];
+  if (orcsDoCliente.length) partes.push(orcsDoCliente.length + ' orçamento(s)');
+  if (pagsDoCliente.length) partes.push(pagsDoCliente.length + ' pagamento(s)');
+  if (agsDoCliente.length) partes.push(agsDoCliente.length + ' agendamento(s)');
+
+  var msg = 'Excluir ' + c.nome + '?';
+  if (partes.length > 0) {
+    msg += ' Serão apagados junto: ' + partes.join(', ') + '.';
+  }
+  if (pendentes.length > 0) {
+    var totalAberto = pendentes.reduce(function(s, p) { return s + p.valor; }, 0);
+    msg += ' ATENÇÃO: há ' + fmtBR(totalAberto) + ' em aberto que deixará de ser cobrado.';
+  }
+  msg += ' Esta ação não pode ser desfeita.';
+
   showConfirm(msg, function() {
-    clientes = clientes.filter(function(x) { return x.id !== c.id; });
-    agendamentos = agendamentos.filter(function(a) { return a.cliente !== c.nome; });
-    _perfilClienteId = null;
-    persistDelete('clientes', c.id, function() {
-      agsDoCliente.forEach(function(a) { persistDelete('agendamentos', a.id, null); });
+    var aplicarMemoria = function() {
+      clientes = clientes.filter(function(x) { return x.id !== c.id; });
+      orcamentos = orcamentos.filter(function(o) { return o.clienteId !== c.id; });
+      pagamentos = pagamentos.filter(function(p) { return p.clienteId !== c.id; });
+      agendamentos = agendamentos.filter(function(a) { return a.cliente !== c.nome; });
+      _perfilClienteId = null;
       showToast('Cliente excluído.');
       fillClienteSelects();
       renderClientes();
       goTo('screen-clientes');
+    };
+    if (!_dbOk) {
+      showToast('Armazenamento indisponível — alteração não será salva.');
+      aplicarMemoria();
+      return;
+    }
+    var itens = [{ store: 'clientes', key: c.id }];
+    orcsDoCliente.forEach(function(o) { itens.push({ store: 'orcamentos', key: o.id }); });
+    pagsDoCliente.forEach(function(p) { itens.push({ store: 'pagamentos', key: p.id }); });
+    agsDoCliente.forEach(function(a) { itens.push({ store: 'agendamentos', key: a.id }); });
+    dbDeleteMany(itens).then(aplicarMemoria).catch(function(e) {
+      console.error('excluirCliente', e);
+      showToast(ERRO_SALVAR);
     });
   });
 }

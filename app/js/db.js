@@ -113,6 +113,25 @@ function dbPutMany(items) {
   });
 }
 
+/* apaga várias chaves (possivelmente em stores diferentes) numa
+   ÚNICA transação — tudo confirma ou tudo aborta.
+   items: [{ store, key }] */
+function dbDeleteMany(items) {
+  return openDB().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      var stores = [];
+      items.forEach(function(i) { if (stores.indexOf(i.store) === -1) stores.push(i.store); });
+      var tx = db.transaction(stores, 'readwrite');
+      tx.oncomplete = function() { resolve(); };
+      tx.onerror = function() { reject(tx.error); };
+      tx.onabort = function() { reject(tx.error || new Error('Transação abortada')); };
+      try {
+        items.forEach(function(i) { tx.objectStore(i.store).delete(i.key); });
+      } catch (e) { reject(e); }
+    });
+  });
+}
+
 function dbDelete(store, key) {
   return openDB().then(function(db) {
     return new Promise(function(resolve, reject) {
