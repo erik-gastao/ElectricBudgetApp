@@ -5,7 +5,7 @@
    precisa ir à rede pra ler um header Date confiável.
    ================================================================ */
 
-var CACHE = 'electricbudget-v1';
+var CACHE = 'electricbudget-v2';
 
 var ASSETS = [
   './',
@@ -13,6 +13,7 @@ var ASSETS = [
   './style.css',
   './js/db.js',
   './js/app.js',
+  './vendor/jspdf.umd.min.js', /* PDF precisa funcionar offline (§7.2) */
   './manifest.json',
   './icons/icon-192.png',
   './icons/icon-512.png',

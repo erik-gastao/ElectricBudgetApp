@@ -1063,10 +1063,159 @@ function adicionarMatOrc(id) {
   goTo('screen-orcamento');
 }
 
-function salvarRascunho() { saveOrcamento('rascunho'); }
-function salvarOrcamentoPDF() { saveOrcamento('enviado'); }
+/* ================================================================
+   PDF DO ORÇAMENTO (F3 — SPEC §7.2)
+   jsPDF local em vendor/ (cacheado pelo SW — funciona offline).
+   Layout: cabeçalho eletricista, cliente, tabela materiais,
+   mão de obra, total, data.
+   ================================================================ */
 
-function saveOrcamento(status) {
+function moedaPdf(v) {
+  return 'R$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function gerarPdfOrcamento(o) {
+  if (!window.jspdf || !window.jspdf.jsPDF) {
+    showToast('Gerador de PDF não carregado. Recarregue o app.');
+    return false;
+  }
+  var doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4' });
+  var W = 210, M = 14, y;
+  var navy = [30, 58, 95], amber = [217, 137, 10], cinza = [107, 90, 70];
+
+  /* cabeçalho — dados do eletricista */
+  doc.setFillColor(navy[0], navy[1], navy[2]);
+  doc.rect(0, 0, W, 32, 'F');
+  doc.setFillColor(amber[0], amber[1], amber[2]);
+  doc.rect(0, 32, W, 1.5, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(17);
+  doc.text('ELECTRIC BUDGET', M, 13);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+  doc.text('Erik Gastão · Eletricista Autônomo · Ijuí – RS', M, 20);
+  doc.text('(55) 9 9999-0000 · erik@eletricista.com', M, 25);
+
+  /* título + data + status */
+  var parts = o.data.split('-');
+  var dataFmt = parts[2] + '/' + parts[1] + '/' + parts[0];
+  doc.setTextColor(navy[0], navy[1], navy[2]);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(15);
+  doc.text('ORÇAMENTO', M, 45);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+  doc.setTextColor(cinza[0], cinza[1], cinza[2]);
+  doc.text('Data: ' + dataFmt + '    Status: ' + (_orcStatusBadge[o.status] || o.status.toUpperCase()), M, 51);
+
+  /* cliente */
+  var c = clienteById(o.clienteId);
+  y = 60;
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
+  doc.setTextColor(cinza[0], cinza[1], cinza[2]);
+  doc.text('CLIENTE', M, y);
+  doc.setDrawColor(220, 210, 190);
+  doc.line(M, y + 1.5, W - M, y + 1.5);
+  y += 7;
+  doc.setTextColor(30, 30, 30);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
+  doc.text(c ? c.nome : 'Cliente', M, y);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+  if (c && c.telefone) { y += 5; doc.text(c.telefone, M, y); }
+  if (c) {
+    var end = [c.endereco, c.bairro, c.cidade].filter(Boolean).join(' – ');
+    if (end) { y += 5; doc.text(end, M, y); }
+  }
+  y += 10;
+
+  function quebraPagina(alt) {
+    if (y + alt > 280) { doc.addPage(); y = 20; }
+  }
+
+  function secao(titulo) {
+    quebraPagina(12);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
+    doc.setTextColor(cinza[0], cinza[1], cinza[2]);
+    doc.text(titulo, M, y);
+    doc.setDrawColor(220, 210, 190);
+    doc.line(M, y + 1.5, W - M, y + 1.5);
+    y += 7;
+  }
+
+  /* materiais */
+  if (o.materiais.length > 0) {
+    secao('MATERIAIS');
+    doc.setFontSize(8); doc.setTextColor(150, 140, 120);
+    doc.text('ITEM', M, y);
+    doc.text('QTD', 130, y, { align: 'right' });
+    doc.text('UNITÁRIO', 160, y, { align: 'right' });
+    doc.text('TOTAL', W - M, y, { align: 'right' });
+    y += 5;
+    doc.setTextColor(30, 30, 30); doc.setFontSize(9);
+    o.materiais.forEach(function(m) {
+      quebraPagina(6);
+      doc.setFont('helvetica', 'normal');
+      doc.text(String(m.nome).slice(0, 55), M, y);
+      doc.text(String(m.qty), 130, y, { align: 'right' });
+      doc.text(moedaPdf(m.preco), 160, y, { align: 'right' });
+      doc.setFont('helvetica', 'bold');
+      doc.text(moedaPdf(m.preco * m.qty), W - M, y, { align: 'right' });
+      y += 5.5;
+    });
+    y += 4;
+  }
+
+  /* mão de obra */
+  if (o.maoDeObra.length > 0) {
+    secao('MÃO DE OBRA');
+    doc.setFontSize(9);
+    o.maoDeObra.forEach(function(m) {
+      quebraPagina(6);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(30, 30, 30);
+      doc.text(String(m.nome).slice(0, 70), M, y);
+      doc.setFont('helvetica', 'bold');
+      doc.text(moedaPdf(m.valor), W - M, y, { align: 'right' });
+      y += 5.5;
+    });
+    y += 4;
+  }
+
+  /* totais — sempre revalidados dos itens (§8) */
+  var totalMat = o.materiais.reduce(function(s, m) { return s + m.preco * m.qty; }, 0);
+  var totalMob = o.maoDeObra.reduce(function(s, m) { return s + m.valor; }, 0);
+  quebraPagina(30);
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(226, 232, 240);
+  doc.rect(M, y, W - 2 * M, 24, 'FD');
+  var yt = y + 7;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+  doc.setTextColor(85, 85, 85);
+  doc.text('MATERIAIS', M + 5, yt);
+  doc.text(moedaPdf(totalMat), W - M - 5, yt, { align: 'right' });
+  yt += 6;
+  doc.text('MÃO DE OBRA', M + 5, yt);
+  doc.text(moedaPdf(totalMob), W - M - 5, yt, { align: 'right' });
+  yt += 7;
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
+  doc.setTextColor(navy[0], navy[1], navy[2]);
+  doc.text('TOTAL', M + 5, yt);
+  doc.text(moedaPdf(totalMat + totalMob), W - M - 5, yt, { align: 'right' });
+
+  /* rodapé */
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
+  doc.setTextColor(150, 150, 150);
+  doc.text('Gerado pelo Electric Budget em ' + hojeLocal().split('-').reverse().join('/'), M, 290);
+
+  var nomeArq = 'orcamento-' + (c ? c.nome : 'cliente')
+    .toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+    + '-' + o.data + '.pdf';
+  doc.save(nomeArq);
+  return true;
+}
+
+function salvarRascunho() { saveOrcamento('rascunho', false); }
+function salvarOrcamentoPDF() { saveOrcamento('enviado', true); }
+
+function saveOrcamento(status, gerarPdf) {
   var erro = document.getElementById('orc-erro');
   var clienteId = document.getElementById('orc-cliente-input').value;
   if (orcamentoAtual.materiais.length === 0 && orcamentoAtual.maoDeObra.length === 0) {
@@ -1100,7 +1249,12 @@ function saveOrcamento(status) {
   _orcEditId = null;
 
   persistPut('orcamentos', orc, function() {
-    showToast(status === 'rascunho' ? 'Rascunho salvo!' : 'Orçamento salvo! (PDF chega na fase 3)');
+    var pdfOk = false;
+    if (gerarPdf) {
+      try { pdfOk = gerarPdfOrcamento(orc); }
+      catch (e) { console.error('pdf', e); showToast('Erro ao gerar o PDF.'); }
+    }
+    showToast(status === 'rascunho' ? 'Rascunho salvo!' : (pdfOk ? 'Orçamento salvo — PDF gerado!' : 'Orçamento salvo!'));
     orcamentoAtual = { materiais: [], maoDeObra: [] };
     var sel = document.getElementById('orc-cliente-input');
     if (sel) sel.selectedIndex = 0;
@@ -1180,9 +1334,20 @@ function renderOrcDetalhe() {
     btns.innerHTML = '<button class="dual-btn" style="color:#ef4444;border-color:#ef4444;" onclick="recusarOrcamento()">RECUSAR</button>'
       + '<button class="dual-btn primary" onclick="aprovarOrcamento()">APROVAR</button>';
   } else if (o.status === 'aprovado') {
-    btns.innerHTML = '<button class="dual-btn primary" style="flex:1;" onclick="verRecibo()">GERAR PDF</button>';
+    btns.innerHTML = '<button class="dual-btn primary" style="flex:1;" onclick="pdfDoDetalhe()">GERAR PDF</button>';
   } else {
     btns.innerHTML = '<div class="empty-state" style="flex:1;padding:4px 0;">Orçamento recusado — somente leitura.</div>';
+  }
+}
+
+function pdfDoDetalhe() {
+  var o = orcamentoById(_orcDetalheId);
+  if (!o) return;
+  try {
+    if (gerarPdfOrcamento(o)) showToast('PDF gerado!');
+  } catch (e) {
+    console.error('pdf', e);
+    showToast('Erro ao gerar o PDF.');
   }
 }
 
