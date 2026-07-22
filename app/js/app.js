@@ -427,8 +427,60 @@ function cobrarPagamento(id) {
   window.open('https://wa.me/' + fone + '?text=' + encodeURIComponent(msg), '_blank');
 }
 
+/* Recibo em PDF do pagamento pago (F6.5) */
 function verRecibo(id) {
-  showToast('Recibo em PDF chega na fase de PDF.');
+  var p = pagamentoById(id);
+  if (!p || p.status !== 'pago') return;
+  if (!window.jspdf || !window.jspdf.jsPDF) {
+    showToast('Gerador de PDF não carregado. Recarregue o app.');
+    return;
+  }
+  var c = clienteById(p.clienteId);
+  var doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4' });
+  var W = 210, M = 14;
+  var navy = [30, 58, 95], amber = [217, 137, 10];
+
+  cabecalhoPdf(doc, W, M, navy, amber);
+
+  doc.setTextColor(navy[0], navy[1], navy[2]);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(15);
+  doc.text('RECIBO DE PAGAMENTO', M, 48);
+
+  var dataPg = (p.dataPagamento || hojeLocal()).split('-').reverse().join('/');
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(11);
+  doc.setTextColor(40, 40, 40);
+  var texto = 'Recebi de ' + (c ? c.nome : 'Cliente') + ' a quantia de ' + moedaPdf(p.valor)
+    + ' referente a "' + p.servico + '", paga em ' + dataPg
+    + (p.forma ? ' via ' + p.forma : '') + '.';
+  var linhas = doc.splitTextToSize(texto, W - 2 * M);
+  doc.text(linhas, M, 62);
+
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(226, 232, 240);
+  doc.rect(M, 80, W - 2 * M, 18, 'FD');
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(16);
+  doc.setTextColor(21, 128, 61);
+  doc.text(moedaPdf(p.valor), W / 2, 92, { align: 'center' });
+
+  doc.setDrawColor(120, 120, 120);
+  doc.line(M + 30, 130, W - M - 30, 130);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+  doc.setTextColor(60, 60, 60);
+  doc.text(perfilEletricista.nome, W / 2, 136, { align: 'center' });
+  if (perfilEletricista.documento) {
+    doc.setFontSize(8); doc.setTextColor(120, 120, 120);
+    doc.text(perfilEletricista.documento, W / 2, 141, { align: 'center' });
+  }
+
+  doc.setFontSize(8); doc.setTextColor(150, 150, 150);
+  doc.text('Gerado pelo Electric Budget em ' + hojeLocal().split('-').reverse().join('/'), M, 290);
+
+  var nomeArq = 'recibo-' + (c ? c.nome : 'cliente')
+    .toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+    + '-' + (p.dataPagamento || hojeLocal()) + '.pdf';
+  doc.save(nomeArq);
+  showToast('Recibo gerado!');
 }
 
 /* ================================================================
@@ -893,6 +945,8 @@ function renderMateriais() {
 
 function novoMaterial() {
   _matEditId = null;
+  var ex = document.getElementById('mat-excluir-btn');
+  if (ex) ex.style.display = 'none';
   document.getElementById('mat-nome-input').value = '';
   document.getElementById('mat-preco-input').value = '';
   document.getElementById('mat-unid-input').value = 'unidade';
@@ -907,6 +961,8 @@ function editarMaterial(id) {
   var m = materialById(id);
   if (!m) return;
   _matEditId = id;
+  var ex = document.getElementById('mat-excluir-btn');
+  if (ex) ex.style.display = 'block';
   document.getElementById('mat-nome-input').value = m.nome;
   document.getElementById('mat-preco-input').value = m.preco;
   document.getElementById('mat-unid-input').value = m.unit;
@@ -916,6 +972,23 @@ function editarMaterial(id) {
   document.getElementById('mat-erro').style.display = 'none';
   document.getElementById('mat-form-title').textContent = 'Editar Material';
   goTo('screen-novo-material');
+}
+
+/* Excluir material (F6.5) — orçamentos antigos não quebram:
+   itens guardam cópia de nome/preço, não referência viva */
+function excluirMaterial() {
+  if (!_matEditId) return;
+  var m = materialById(_matEditId);
+  if (!m) return;
+  showConfirm('Excluir "' + m.nome + '" do catálogo? Orçamentos já criados não são alterados.', function() {
+    var id = _matEditId;
+    materiais = materiais.filter(function(x) { return x.id !== id; });
+    _matEditId = null;
+    persistDelete('materiais', id, function() {
+      showToast('Material excluído.');
+      goTo('screen-materiais');
+    });
+  });
 }
 
 function filterMateriais(el) {
@@ -1042,6 +1115,35 @@ function abrirPerfilPorNome(nome) {
   for (var i = 0; i < clientes.length; i++) {
     if (clientes[i].nome === nome) { abrirPerfilCliente(clientes[i].id); return; }
   }
+}
+
+/* Excluir cliente (F6.5) — bloqueia se houver histórico financeiro;
+   agendamentos do cliente saem junto (cascata confirmada) */
+function excluirCliente() {
+  var c = clienteById(_perfilClienteId);
+  if (!c) return;
+  var temFinanceiro = pagamentos.some(function(p) { return p.clienteId === c.id; })
+    || orcamentos.some(function(o) { return o.clienteId === c.id; });
+  if (temFinanceiro) {
+    showToast('Cliente com orçamentos ou pagamentos não pode ser excluído.');
+    return;
+  }
+  var agsDoCliente = agendamentos.filter(function(a) { return a.cliente === c.nome; });
+  var msg = 'Excluir ' + c.nome + '?'
+    + (agsDoCliente.length > 0 ? ' ' + agsDoCliente.length + ' agendamento(s) dele também serão removidos.' : '')
+    + ' Esta ação não pode ser desfeita.';
+  showConfirm(msg, function() {
+    clientes = clientes.filter(function(x) { return x.id !== c.id; });
+    agendamentos = agendamentos.filter(function(a) { return a.cliente !== c.nome; });
+    _perfilClienteId = null;
+    persistDelete('clientes', c.id, function() {
+      agsDoCliente.forEach(function(a) { persistDelete('agendamentos', a.id, null); });
+      showToast('Cliente excluído.');
+      fillClienteSelects();
+      renderClientes();
+      goTo('screen-clientes');
+    });
+  });
 }
 
 function novoCliente() {
@@ -1253,6 +1355,78 @@ function adicionarMatOrc(id) {
 }
 
 /* ================================================================
+   PERFIL DO ELETRICISTA (F6.5)
+   Persistido em preferencias; entra no cabeçalho dos PDFs.
+   ================================================================ */
+
+var PERFIL_PADRAO = {
+  nome: 'Erik Gastão',
+  sub: 'Eletricista Autônomo · Ijuí – RS',
+  telefone: '(55) 9 9999-0000',
+  email: 'erik@eletricista.com',
+  documento: '000.000.000-00'
+};
+var perfilEletricista = Object.assign({}, PERFIL_PADRAO);
+
+function carregarPerfilEletricista() {
+  if (!_dbOk) return Promise.resolve();
+  return dbGet('preferencias', 'perfil').then(function(p) {
+    if (p && p.value) perfilEletricista = Object.assign({}, PERFIL_PADRAO, p.value);
+  }).catch(function() {});
+}
+
+function renderPerfilEletricista() {
+  var pe = perfilEletricista;
+  var setar = function(id, v) { var el = document.getElementById(id); if (el) el.textContent = v || '—'; };
+  setar('pe-nome', pe.nome);
+  setar('pe-sub', pe.sub);
+  setar('pe-tel', pe.telefone);
+  setar('pe-email', pe.email);
+  setar('pe-doc', pe.documento);
+  var av = document.getElementById('pe-avatar');
+  if (av) av.textContent = iniciais(pe.nome);
+}
+
+function abrirEditarPerfil() {
+  var pe = perfilEletricista;
+  document.getElementById('pe-nome-input').value = pe.nome;
+  document.getElementById('pe-sub-input').value = pe.sub;
+  document.getElementById('pe-tel-input').value = pe.telefone;
+  document.getElementById('pe-email-input').value = pe.email;
+  document.getElementById('pe-doc-input').value = pe.documento;
+  document.getElementById('pe-erro').style.display = 'none';
+  goTo('screen-editar-perfil');
+}
+
+function salvarPerfilEletricista() {
+  var nome = document.getElementById('pe-nome-input').value.trim();
+  var erro = document.getElementById('pe-erro');
+  if (!nome) { erro.textContent = 'Informe o nome.'; erro.style.display = 'block'; return; }
+  erro.style.display = 'none';
+
+  perfilEletricista = {
+    nome: nome,
+    sub: document.getElementById('pe-sub-input').value.trim(),
+    telefone: document.getElementById('pe-tel-input').value.trim(),
+    email: document.getElementById('pe-email-input').value.trim(),
+    documento: document.getElementById('pe-doc-input').value.trim()
+  };
+  var fim = function() {
+    showToast('Perfil salvo!');
+    renderPerfilEletricista();
+    goTo('screen-perfil-eletricista');
+  };
+  if (_dbOk) {
+    dbPut('preferencias', { key: 'perfil', value: perfilEletricista })
+      .then(fim)
+      .catch(function(e) { console.error('perfil', e); showToast(ERRO_SALVAR); });
+  } else {
+    showToast('Armazenamento indisponível — alteração não será salva.');
+    fim();
+  }
+}
+
+/* ================================================================
    PDF DO ORÇAMENTO (F3 — SPEC §7.2)
    jsPDF local em vendor/ (cacheado pelo SW — funciona offline).
    Layout: cabeçalho eletricista, cliente, tabela materiais,
@@ -1261,6 +1435,21 @@ function adicionarMatOrc(id) {
 
 function moedaPdf(v) {
   return 'R$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/* cabeçalho comum aos PDFs (orçamento e recibo) — dados do perfil */
+function cabecalhoPdf(doc, W, M, navy, amber) {
+  var pe = perfilEletricista;
+  doc.setFillColor(navy[0], navy[1], navy[2]);
+  doc.rect(0, 0, W, 32, 'F');
+  doc.setFillColor(amber[0], amber[1], amber[2]);
+  doc.rect(0, 32, W, 1.5, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(17);
+  doc.text('ELECTRIC BUDGET', M, 13);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+  doc.text([pe.nome, pe.sub].filter(Boolean).join(' · '), M, 20);
+  doc.text([pe.telefone, pe.email].filter(Boolean).join(' · '), M, 25);
 }
 
 function gerarPdfOrcamento(o) {
@@ -1272,17 +1461,7 @@ function gerarPdfOrcamento(o) {
   var W = 210, M = 14, y;
   var navy = [30, 58, 95], amber = [217, 137, 10], cinza = [107, 90, 70];
 
-  /* cabeçalho — dados do eletricista */
-  doc.setFillColor(navy[0], navy[1], navy[2]);
-  doc.rect(0, 0, W, 32, 'F');
-  doc.setFillColor(amber[0], amber[1], amber[2]);
-  doc.rect(0, 32, W, 1.5, 'F');
-  doc.setTextColor(255, 255, 255);
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(17);
-  doc.text('ELECTRIC BUDGET', M, 13);
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
-  doc.text('Erik Gastão · Eletricista Autônomo · Ijuí – RS', M, 20);
-  doc.text('(55) 9 9999-0000 · erik@eletricista.com', M, 25);
+  cabecalhoPdf(doc, W, M, navy, amber);
 
   /* título + data + status */
   var parts = o.data.split('-');
@@ -1451,6 +1630,52 @@ function saveOrcamento(status, gerarPdf) {
   });
 }
 
+/* ── LISTA GERAL DE ORÇAMENTOS (F6.5) ── */
+
+function abrirListaOrcamentos(filtro) {
+  document.querySelectorAll('#orc-list-filter .filter-chip').forEach(function(ch) {
+    ch.classList.toggle('active', ch.textContent === (filtro || 'TODOS'));
+  });
+  goTo('screen-lista-orcamentos');
+}
+
+function filterListaOrc(el) {
+  document.querySelectorAll('#orc-list-filter .filter-chip').forEach(function(c) { c.classList.remove('active'); });
+  el.classList.add('active');
+  renderListaOrcamentos();
+}
+
+function renderListaOrcamentos() {
+  var list = document.getElementById('lista-orc');
+  if (!list) return;
+  var activeChip = document.querySelector('#orc-list-filter .filter-chip.active');
+  var filtro = activeChip ? activeChip.textContent : 'TODOS';
+
+  var items = orcamentos.filter(function(o) {
+    return filtro === 'TODOS' || o.status === filtro.toLowerCase();
+  }).sort(function(a, b) { return b.data.localeCompare(a.data); });
+
+  if (items.length === 0) {
+    list.innerHTML = '<div class="empty-state">Nenhum orçamento'
+      + (filtro !== 'TODOS' ? ' com status ' + filtro.toLowerCase() : '')
+      + '.<br/>Crie um pelo botão abaixo.</div>';
+    return;
+  }
+
+  list.innerHTML = items.map(function(o) {
+    var dataFmt = o.data.split('-').reverse().join('/');
+    return '<div class="orc-hist-row" onclick="abrirOrcDetalhe(\'' + o.id + '\')">'
+      + '<div class="orc-hist-left">'
+      + '<div class="orc-hist-nome">' + esc(clienteNome(o.clienteId)) + '</div>'
+      + '<div class="orc-hist-data">' + esc(resumoOrcamento(o)) + ' · ' + dataFmt + '</div>'
+      + '</div>'
+      + '<div class="orc-hist-right">'
+      + '<span class="orc-hist-val">' + fmtBR(o.total) + '</span>'
+      + '<span class="orc-hist-badge ' + o.status + '">' + (_orcStatusBadge[o.status] || o.status.toUpperCase()) + '</span>'
+      + '</div></div>';
+  }).join('');
+}
+
 /* ── DETALHE DO ORÇAMENTO ── */
 
 var _orcDetalheId = null;
@@ -1468,6 +1693,8 @@ function abrirOrcDetalhe(id) {
 function voltarDoOrcDetalhe() {
   if (_odReturn === 'screen-perfil-cliente' && _perfilClienteId) {
     abrirPerfilCliente(_perfilClienteId);
+  } else if (_odReturn === 'screen-lista-orcamentos' || _odReturn === 'screen-notificacoes') {
+    goTo(_odReturn);
   } else {
     goTo('screen-home');
   }
@@ -1765,6 +1992,8 @@ function goTo(id) {
   if (sb) sb.scrollTop = 0;
   if (id === 'screen-home') { renderHomeAgenda(); renderPayHome(); atualizarBadgeSino(); }
   if (id === 'screen-notificacoes') renderNotificacoes();
+  if (id === 'screen-lista-orcamentos') renderListaOrcamentos();
+  if (id === 'screen-perfil-eletricista') renderPerfilEletricista();
   if (id === 'screen-relatorio') renderRelatorio();
   if (id === 'screen-orcamento') renderOrcamento();
   if (id === 'screen-picker-material') renderPickerMaterial();
@@ -1847,7 +2076,7 @@ function verificarRelogio() {
 
 openDB().then(function() {
   _dbOk = true;
-  return seedIfEmpty().then(loadAll);
+  return seedIfEmpty().then(loadAll).then(carregarPerfilEletricista);
 }).catch(function(e) {
   console.error('IndexedDB indisponível:', e);
   _dbOk = false;

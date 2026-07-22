@@ -32,12 +32,13 @@ Eletricista autônomo gerencia o negócio em caderno e planilha: orçamento feit
 
 ## ⚡ Funcionalidades
 
-- **Orçamentos** — monta com materiais cadastrados (preço × quantidade) + mão de obra; totais automáticos; **gera PDF profissional** na hora, até sem internet
+- **Orçamentos** — monta com materiais cadastrados (preço × quantidade) + mão de obra; totais automáticos; **gera PDF profissional** na hora, até sem internet; lista geral com filtro por status
 - **Ciclo de venda completo** — rascunho → enviado → aprovado/recusado; aprovar gera cobrança automaticamente
-- **Pagamentos** — pendente/pago com atraso detectado automaticamente pela data de vencimento; filtros por status e mês
+- **Pagamentos** — pendente/pago com atraso detectado automaticamente pela data de vencimento; filtros por status e mês; **recibo em PDF**
 - **Agenda** — calendário mensal interativo, compromissos agrupados por dia com labels "HOJE"/"AMANHÃ"
-- **Clientes** — cadastro completo, perfil com financeiro (faturado × em aberto) e histórico de orçamentos
-- **Materiais** — catálogo com busca, filtro por categoria e edição in-place
+- **Clientes** — cadastro, edição e exclusão (bloqueada se houver histórico financeiro), perfil com financeiro (faturado × em aberto) e histórico de orçamentos
+- **Materiais** — catálogo com busca, filtro por categoria, edição e exclusão
+- **Meu Perfil** — dados do eletricista editáveis; entram no cabeçalho dos PDFs
 - **Relatório** — faturado, em aberto, receita mensal em gráfico e ranking de clientes
 - **Notificações** — central com atrasos, vencimentos e compromissos do dia; badge no sino; **cobrança pelo WhatsApp** com mensagem pronta
 - **Busca global** — clientes, serviços, materiais e agendamentos num campo só

@@ -47,14 +47,15 @@
 <div id="home-agenda-list"></div>
 <div class="section-header">
 <span class="section-label">Orçamentos</span>
-<span class="section-link" onclick="goTo('screen-relatorio')" role="button">VER TODOS</span>
+<span class="section-link" onclick="abrirListaOrcamentos('TODOS')" role="button">VER TODOS</span>
 </div>
 <div class="orc-row">
-<div class="orc-chip pendente" onclick="novoOrcamento()" aria-label="Ver orçamentos pendentes">PENDENTES</div>
-<div class="orc-chip aguardando" onclick="novoOrcamento()" aria-label="Ver orçamentos aguardando aprovação">AGUARDANDO</div>
+<div class="orc-chip pendente" onclick="abrirListaOrcamentos('RASCUNHO')" aria-label="Ver orçamentos em rascunho">PENDENTES</div>
+<div class="orc-chip aguardando" onclick="abrirListaOrcamentos('ENVIADO')" aria-label="Ver orçamentos aguardando aprovação">AGUARDANDO</div>
 </div>
 <div class="section-header" style="margin-top:20px;">
 <span class="section-label">Pagamentos</span>
+<span class="section-link" onclick="goTo('screen-relatorio')" role="button">RELATÓRIO</span>
 </div>
 <div class="pay-home-scroll" id="pay-home-list"></div>
 </div>
@@ -255,6 +256,7 @@
 </div>
 </div>
 <div id="mat-erro" style="display:none;color:#ef4444;font-size:12px;margin-top:10px;font-weight:600;"></div>
+<button id="mat-excluir-btn" class="excluir-btn" style="display:none;" onclick="excluirMaterial()">EXCLUIR MATERIAL</button>
 <div style="height:16px;"></div>
 </div>
 <div style="padding:12px 16px 20px;border-top:1px solid #e0e0e0;background:#fff;flex-shrink:0;">
@@ -519,6 +521,7 @@
 <span class="form-section-label">ORÇAMENTOS</span>
 </div>
 <div id="pc-orc-list"></div>
+<button class="excluir-btn" onclick="excluirCliente()">EXCLUIR CLIENTE</button>
 <div style="height:16px;"></div>
 </div>
 </div>
@@ -589,23 +592,23 @@
 <div class="scroll-body">
 <div class="perfil-header-box">
 <div class="perfil-edit-row">
-<span class="perfil-edit-link">EDITAR</span>
+<span class="perfil-edit-link" onclick="abrirEditarPerfil()">EDITAR</span>
 </div>
 <div class="perfil-avatar-row">
-<div class="perfil-avatar" style="background:#1e293b;color:#fff;">EG</div>
+<div class="perfil-avatar" id="pe-avatar" style="background:#1e293b;color:#fff;">EG</div>
 <div>
-<div class="perfil-nome">Erik Gastão</div>
-<div class="perfil-cidade">Eletricista Autônomo · Ijuí – RS</div>
+<div class="perfil-nome" id="pe-nome">Erik Gastão</div>
+<div class="perfil-cidade" id="pe-sub">Eletricista Autônomo · Ijuí – RS</div>
 </div>
 </div>
 </div>
 <div class="perfil-info-box">
 <div class="perfil-info-label">CELULAR/WHATSAPP</div>
-<div class="perfil-info-val">(55) 9 9999-0000</div>
+<div class="perfil-info-val" id="pe-tel">(55) 9 9999-0000</div>
 <div class="perfil-info-label">E-MAIL</div>
-<div class="perfil-info-val">erik@eletricista.com</div>
+<div class="perfil-info-val" id="pe-email">erik@eletricista.com</div>
 <div class="perfil-info-label">CNPJ / CPF</div>
-<div class="perfil-info-val">000.000.000-00</div>
+<div class="perfil-info-val" id="pe-doc">000.000.000-00</div>
 </div>
 <div class="form-section-label" style="margin-bottom:6px;">CONFIGURAÇÕES</div>
 <div style="border-top:1.5px solid #222;margin-bottom:14px;"></div>
@@ -660,6 +663,65 @@
 </div>
 <div id="rel-top-clientes"></div>
 <div style="height:16px;"></div>
+</div>
+</div>
+<!-- ===== LISTA ORÇAMENTOS ===== -->
+<div class="screen" id="screen-lista-orcamentos">
+<div class="topbar">
+<div class="topbar-row">
+<button class="back-btn" onclick="goTo('screen-home')" aria-label="Voltar">←</button>
+<span class="topbar-title">Orçamentos</span>
+<span style="width:28px;"></span>
+</div>
+</div>
+<div class="scroll-body">
+<div class="sub-label">MEUS ORÇAMENTOS</div>
+<div class="filter-row" id="orc-list-filter">
+<div class="filter-chip active" onclick="filterListaOrc(this)">TODOS</div>
+<div class="filter-chip" onclick="filterListaOrc(this)">RASCUNHO</div>
+<div class="filter-chip" onclick="filterListaOrc(this)">ENVIADO</div>
+<div class="filter-chip" onclick="filterListaOrc(this)">APROVADO</div>
+<div class="filter-chip" onclick="filterListaOrc(this)">RECUSADO</div>
+</div>
+<div id="lista-orc"></div>
+<div class="scroll-indicator">▽</div>
+<div style="height:16px;"></div>
+</div>
+<div class="bottom-bar" style="justify-content:flex-end;">
+<div class="bottom-action" onclick="novoOrcamento()">
+<div class="fab">+</div>
+<div class="fab-label">Novo<br/>Orçamento</div>
+</div>
+</div>
+</div>
+<!-- ===== EDITAR PERFIL ELETRICISTA ===== -->
+<div class="screen" id="screen-editar-perfil">
+<div class="topbar">
+<div class="topbar-row">
+<button class="back-btn" onclick="goTo('screen-perfil-eletricista')">←</button>
+<span class="topbar-title">Editar Perfil</span>
+<span style="width:28px;"></span>
+</div>
+</div>
+<div class="scroll-body">
+<div class="form-section-label" style="margin-bottom:6px;">MEUS DADOS</div>
+<div style="border-top:1.5px solid #d0d0d0;margin-bottom:14px;"></div>
+<div class="field-label">NOME</div>
+<input id="pe-nome-input" class="field-input" placeholder="Seu nome" type="text"/>
+<div class="field-label">ATIVIDADE / CIDADE</div>
+<input id="pe-sub-input" class="field-input" placeholder="Ex: Eletricista Autônomo · Ijuí – RS" type="text"/>
+<div class="field-label">TELEFONE / WHATSAPP</div>
+<input id="pe-tel-input" class="field-input" placeholder="(55) 9 9000-0000" type="text"/>
+<div class="field-label">E-MAIL</div>
+<input id="pe-email-input" class="field-input" placeholder="voce@email.com" type="email"/>
+<div class="field-label">CNPJ / CPF</div>
+<input id="pe-doc-input" class="field-input" placeholder="000.000.000-00" type="text"/>
+<div style="font-size:11px;color:#94785A;margin-top:12px;line-height:1.5;">Estes dados aparecem no cabeçalho dos PDFs de orçamento e recibo.</div>
+<div id="pe-erro" style="display:none;color:#ef4444;font-size:12px;margin-top:10px;font-weight:600;"></div>
+<div style="height:16px;"></div>
+</div>
+<div style="padding:12px 16px 20px;border-top:1px solid #e0e0e0;background:#fff;flex-shrink:0;">
+<button class="full-btn" onclick="salvarPerfilEletricista()">SALVAR PERFIL</button>
 </div>
 </div>
 </div>

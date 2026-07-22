@@ -937,3 +937,12 @@
     padding: 0 4px; border: 2px solid var(--surface);
   }
   .bell-count.show { display: flex; }
+
+  /* BOTÃO EXCLUIR (F6.5) */
+  .excluir-btn {
+    width: 100%; border: 1.5px solid #ef4444; border-radius: 10px;
+    padding: 11px 0; margin-top: 18px;
+    font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px;
+    background: #fff; color: #ef4444; cursor: pointer; transition: background .12s;
+  }
+  .excluir-btn:hover { background: #fef2f2; }
