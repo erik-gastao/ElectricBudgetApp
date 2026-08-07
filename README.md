@@ -33,20 +33,21 @@ Eletricista autônomo gerencia o negócio em caderno e planilha: orçamento feit
 
 ## ⚡ Funcionalidades
 
-- **Orçamentos** — monta com materiais cadastrados (preço × quantidade) + mão de obra; totais automáticos; **gera PDF profissional** na hora, até sem internet; lista geral com filtro por status
+- **Orçamentos** — monta com materiais cadastrados (preço × quantidade) + mão de obra; totais automáticos; **gera PDF profissional** na hora, até sem internet; ao gerar, **pergunta se quer abrir o PDF na tela**; lista geral com filtro por status
 - **Ciclo de venda completo** — rascunho → enviado → aprovado/recusado; aprovar gera cobrança automaticamente
 - **Pagamentos** — pendente/pago com atraso detectado automaticamente pela data de vencimento; filtros por status e mês; **recibo em PDF**
-- **Agenda** — calendário mensal interativo, compromissos agrupados por dia com labels "HOJE"/"AMANHÃ"
-- **Clientes** — cadastro, edição e exclusão (bloqueada se houver histórico financeiro), perfil com financeiro (faturado × em aberto) e histórico de orçamentos
+- **Home** — visão rápida do dia: agenda de hoje/semana, **últimos 3 orçamentos**, pagamentos a receber
+- **Agenda** — calendário mensal interativo, compromissos agrupados por dia com labels "HOJE"/"AMANHÃ"; descrição do serviço **opcional** ("Não definido"); marcar compromisso como **concluído**; **criar orçamento direto do compromisso** (já com o cliente preenchido)
+- **Clientes** — cadastro, edição e exclusão (bloqueada se houver histórico financeiro), perfil com financeiro (faturado × em aberto) e histórico de orçamentos; no app Android, **importar da agenda de contatos do celular**
 - **Materiais** — catálogo com busca, filtro por categoria, edição e exclusão
 - **Meu Perfil** — dados do eletricista editáveis; entram no cabeçalho dos PDFs
 - **Relatório** — faturado, em aberto, receita mensal em gráfico e ranking de clientes
-- **Notificações** — central com atrasos, vencimentos e compromissos do dia; badge no sino; **cobrança pelo WhatsApp** com mensagem pronta
+- **Notificações** — central com atrasos, vencimentos e compromissos do dia; badge no sino; **cobrança pelo WhatsApp** com mensagem pronta; no app Android, **lembretes agendados de compromisso** (24 h, 12 h, 6 h, 1 h e 30 min antes) que chegam com o app fechado, com liga/desliga por compromisso
 - **Busca global** — clientes, serviços, materiais e agendamentos num campo só
 
 ## 📱 Instalar no celular
 
-**Opção A — APK (Android):** baixe o `.apk` na [página de Releases](https://github.com/erik-gastao/ElectricBudgetApp/releases/latest), abra no aparelho e autorize a instalação. App nativo via Capacitor.
+**Opção A — APK (Android):** baixe o `.apk` na [página de Releases](https://github.com/erik-gastao/ElectricBudgetApp/releases/latest), abra no aparelho e autorize a instalação. App nativo via Capacitor. Recursos que **só existem no APK**: lembretes de compromisso agendados e importação de clientes dos contatos do celular (o PWA ignora essas partes com segurança).
 
 **Opção B — PWA (qualquer aparelho):**
 1. Abra **https://erik-gastao.github.io/ElectricBudgetApp/** no Chrome
@@ -84,7 +85,7 @@ IndexedDB `electricbudget` — cinco entidades com **UUID** (`crypto.randomUUID`
 | `clientes` | nome | avatar gerado das iniciais |
 | `materiais` | cat, nome | catálogo de preços |
 | `orcamentos` | clienteId, status, data | itens persistidos junto — total sempre revalidado |
-| `agendamentos` | data | consulta por dia/mês |
+| `agendamentos` | data | consulta por dia/mês; `concluido` e `notifOn` (lembretes) por compromisso |
 | `pagamentos` | clienteId, status, data | `atrasado` **nunca é salvo** — derivado no render |
 
 ### Máquina de status
@@ -139,6 +140,8 @@ Suíte E2E com Puppeteer + Chrome real cobrindo: seed e hidratação, CRUDs, flu
 - [x] **F5** — relatório completo (gráfico real de receita mensal)
 - [x] **F6** — notificações (central dinâmica, cobrança via WhatsApp, Notification API)
 - [x] **F7** — Capacitor → APK Android nas [Releases](https://github.com/erik-gastao/ElectricBudgetApp/releases) (build automático por tag)
+- [x] **F8** (v1.1.0) — recursos nativos: lembretes de compromisso agendados (Local Notifications) e importação de clientes dos contatos do celular; melhorias de UX (últimos orçamentos na home, concluído, orçamento a partir do compromisso, abrir PDF)
+- [ ] tema nativo dos seletores de data/hora (cores do app no diálogo do Android)
 
 ## 🎨 Origem
 
