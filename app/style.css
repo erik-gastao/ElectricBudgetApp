@@ -73,6 +73,8 @@
 
   /* AGENDA CARD (home) */
   .agenda-card { border: 1.5px solid #F0DDBB; border-left: 4px solid var(--brand); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; background: var(--surface-alt); }
+  .agenda-card.concluido { opacity: .6; border-left-color: #16a34a; }
+  .agenda-card.concluido .descricao { text-decoration: line-through; }
   .agenda-card .horario { font-size: 11px; color: var(--brand-dark); text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 2px; font-weight: 700; }
   .agenda-card .cliente-name { font-size: 15px; font-weight: 700; margin-bottom: 1px; color: var(--ink); }
   .agenda-card .descricao { font-size: 13px; color: #6b5a46; }
@@ -166,8 +168,12 @@
   /* FORM FIELDS */
   .field-label { font-size: 13px; color: #94785A; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; margin-top: 14px; font-weight: 700; }
   .field-label:first-child { margin-top: 0; }
-  .field-input { width: 100%; border: 1.5px solid #e5d4b8; border-radius: 22px; padding: 9px 16px; font-size: 14px; color: var(--ink); outline: none; background: #fff; transition: border-color .15s; }
+  .field-input { width: 100%; border: 1.5px solid #e5d4b8; border-radius: 22px; padding: 9px 16px; font-size: 14px; color: var(--ink); outline: none; background: #fff; transition: border-color .15s; accent-color: var(--brand); }
   .field-input:focus { border-color: var(--brand); }
+  /* date/time: cor do app no seletor nativo + evita corte do texto à direita */
+  .field-input[type=date], .field-input[type=time] { accent-color: var(--brand); color-scheme: light; min-height: 40px; padding-right: 10px; }
+  .field-input[type=date]::-webkit-calendar-picker-indicator,
+  .field-input[type=time]::-webkit-calendar-picker-indicator { filter: invert(48%) sepia(69%) saturate(560%) hue-rotate(2deg); cursor: pointer; margin-left: 4px; }
   .field-textarea { width: 100%; border: 1.5px solid #e5d4b8; border-radius: 12px; padding: 10px 14px; font-size: 14px; color: var(--ink); outline: none; background: #fff; resize: none; font-family: inherit; min-height: 80px; }
   .field-select { width: 100%; border: 1.5px solid #e5d4b8; border-radius: 22px; padding: 9px 16px; font-size: 14px; color: #8a7a64; outline: none; background: #fff; appearance: none; cursor: pointer; }
   .select-wrap { position: relative; }
@@ -221,6 +227,9 @@
   .agenda-event-bar.urgente { background: #ef4444; }
   .agenda-event-info .ev-desc { font-size: 14px; font-weight: 700; color: var(--ink); }
   .agenda-event-info .ev-cli { font-size: 13px; color: #6b5a46; }
+  .agenda-event-row.concluido { opacity: .6; }
+  .agenda-event-row.concluido .agenda-event-bar { background: #16a34a; }
+  .agenda-event-row.concluido .ev-desc { color: #16a34a; text-decoration: line-through; }
 
   /* PERFIL CLIENTE */
   .perfil-header-box { border-bottom: 1px solid #F0DDBB; padding-bottom: 14px; margin-bottom: 14px; }
@@ -912,7 +921,8 @@
   .clock-banner-close { background: none; border: none; color: #92400e; font-size: 16px; cursor: pointer; flex-shrink: 0; line-height: 1; }
 
   /* MODAL DATA DE VENCIMENTO (fluxo APROVAR — §8.1 SPEC) */
-  .venc-input { width: 100%; border: 1.5px solid #e5d4b8; border-radius: 10px; padding: 10px 14px; font-size: 14px; color: var(--ink); outline: none; background: #fff; margin-bottom: 16px; font-family: inherit; }
+  .venc-input { width: 100%; border: 1.5px solid #e5d4b8; border-radius: 10px; padding: 10px 14px; font-size: 14px; color: var(--ink); outline: none; background: #fff; margin-bottom: 16px; font-family: inherit; accent-color: var(--brand); color-scheme: light; }
+  .venc-input::-webkit-calendar-picker-indicator { filter: invert(48%) sepia(69%) saturate(560%) hue-rotate(2deg); cursor: pointer; }
 
   /* CELULAR: app ocupa a tela toda (instalado via PWA)
      svh = viewport com a barra de URL visível — garante que a

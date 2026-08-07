@@ -57,6 +57,8 @@
 <div class="orc-chip pendente" onclick="abrirListaOrcamentos('RASCUNHO')" aria-label="Ver orçamentos em rascunho">PENDENTES</div>
 <div class="orc-chip aguardando" onclick="abrirListaOrcamentos('ENVIADO')" aria-label="Ver orçamentos aguardando aprovação">AGUARDANDO</div>
 </div>
+<div class="sub-label" style="margin-top:12px;">ÚLTIMOS</div>
+<div id="home-orc-list"></div>
 <div class="section-header" style="margin-top:20px;">
 <span class="section-label">Pagamentos</span>
 <span class="section-link" onclick="goTo('screen-relatorio')" role="button">RELATÓRIO</span>
@@ -175,6 +177,7 @@
 <input id="cli-busca" placeholder="Buscar cliente..." type="text" oninput="renderClientes()"/>
 </div>
 <div class="clientes-count" id="clientes-count">0 CLIENTES CADASTRADOS</div>
+<button id="btn-contatos-tel" class="full-btn" style="display:none;background:var(--ink);box-shadow:none;margin-bottom:12px;" onclick="abrirContatosTelefone()">📱 CONTATOS DO CELULAR</button>
 <div id="clientes-list"></div>
 <div class="scroll-indicator">▽</div>
 <div style="height:16px;"></div>
@@ -183,6 +186,32 @@
 <div class="bottom-action" onclick="novoCliente()">
 <div class="fab">+</div>
 <div class="fab-label">Adicionar<br/>Cliente</div>
+</div>
+</div>
+</div>
+<!-- ===== CONTATOS DO CELULAR (F7 · §2/§7) ===== -->
+<div class="screen" id="screen-contatos-tel">
+<div class="topbar">
+<div class="topbar-row">
+<button class="back-btn" onclick="goTo('screen-clientes')" aria-label="Voltar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
+<span class="topbar-title">Contatos do Celular</span>
+<span style="width:40px;"></span>
+</div>
+</div>
+<div class="scroll-body">
+<div class="sub-label">DO SEU CELULAR</div>
+<div class="search-box">
+<span class="search-icon">🔍</span>
+<input id="contato-busca" placeholder="Buscar contato..." type="text" oninput="renderContatosTelefone()"/>
+</div>
+<div style="font-size:12px;color:#94785A;margin:4px 0 10px;">Toque num contato para adicioná-lo como cliente.</div>
+<div id="contatos-tel-list"><div class="empty-state">Carregando contatos…</div></div>
+<div style="height:16px;"></div>
+</div>
+<div class="bottom-bar" style="justify-content:flex-end;">
+<div class="bottom-action" onclick="abrirAppContatos()">
+<div class="fab">+</div>
+<div class="fab-label">Novo no<br/>Celular</div>
 </div>
 </div>
 </div>
@@ -391,6 +420,9 @@
 <div class="perfil-info-label" id="det-obs-label">OBSERVAÇÕES</div>
 <div class="perfil-info-val" id="det-obs"></div>
 </div>
+<button class="full-btn" style="margin-top:16px;background:var(--ink);box-shadow:none;" onclick="criarOrcamentoDoCompromisso()">CRIAR ORÇAMENTO</button>
+<button id="det-concluido-btn" class="full-btn" style="margin-top:10px;" onclick="toggleConcluidoAgendamento()"></button>
+<button id="det-notif-btn" class="full-btn" style="margin-top:10px;background:var(--ink-light);box-shadow:none;display:none;" onclick="toggleNotifAgendamento()"></button>
 <div style="height:16px;"></div>
 </div>
 <div class="dual-btns">
@@ -416,7 +448,7 @@
 <option disabled selected value="">Selecionar cliente...</option>
 </select>
 </div>
-<div class="field-label">DESCRIÇÃO DO SERVIÇO</div>
+<div class="field-label">DESCRIÇÃO DO SERVIÇO <span style="font-weight:400;opacity:.6;">(opcional)</span></div>
 <input id="ag-desc-input" class="field-input" placeholder="Ex: Instalação de quadro elétrico" type="text" maxlength="120"/>
 <div class="field-row2" style="margin-top:14px;">
 <div>

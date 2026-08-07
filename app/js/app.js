@@ -69,19 +69,24 @@ function showToast(msg) {
 
 /* ── CONFIRM ── */
 var _confirmCb = null;
-function showConfirm(msg, cb) {
+var _confirmCancelCb = null;
+function showConfirm(msg, cb, cancelCb) {
   document.getElementById('confirm-msg').textContent = msg;
   document.getElementById('confirm-modal').classList.add('show');
   _confirmCb = cb;
+  _confirmCancelCb = cancelCb || null;
 }
 function confirmOk() {
   document.getElementById('confirm-modal').classList.remove('show');
-  if (_confirmCb) _confirmCb();
-  _confirmCb = null;
+  var cb = _confirmCb;
+  _confirmCb = null; _confirmCancelCb = null;
+  if (cb) cb();
 }
 function confirmCancel() {
   document.getElementById('confirm-modal').classList.remove('show');
-  _confirmCb = null;
+  var cb = _confirmCancelCb;
+  _confirmCb = null; _confirmCancelCb = null;
+  if (cb) cb();
 }
 
 /* ── MODAL VENCIMENTO (fluxo APROVAR — SPEC §8.1) ── */
@@ -434,6 +439,23 @@ function cobrarPagamento(id) {
   window.open('https://wa.me/' + fone + '?text=' + encodeURIComponent(msg), '_blank');
 }
 
+/* Entrega do PDF (§3) — pergunta "abrir?"; abre na tela ou baixa.
+   No Android nativo (F7) trocar por Filesystem + FileOpener. */
+function entregarPdf(doc, nomeArq, label) {
+  function baixar() {
+    try { doc.save(nomeArq); } catch (e) { showToast('Falha ao salvar PDF.'); }
+  }
+  showConfirm('Abrir ' + label + ' agora?', function() {
+    try {
+      var blob = doc.output('blob');
+      var url = URL.createObjectURL(blob);
+      var aba = window.open(url, '_blank');
+      if (!aba) { baixar(); }               /* popup bloqueado → baixa */
+      setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
+    } catch (e) { baixar(); }
+  }, baixar);                                /* recusou abrir → baixa mesmo assim */
+}
+
 /* Recibo em PDF do pagamento pago (F6.5) */
 function verRecibo(id) {
   var p = pagamentoById(id);
@@ -486,8 +508,8 @@ function verRecibo(id) {
     .toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
     + '-' + (p.dataPagamento || hojeLocal()) + '.pdf';
-  doc.save(nomeArq);
   showToast('Recibo gerado!');
+  entregarPdf(doc, nomeArq, 'o recibo');
 }
 
 /* ================================================================
@@ -655,6 +677,98 @@ function dispararNotificacoesLocais() {
 }
 
 /* ================================================================
+   NOTIFICAÇÕES NATIVAS AGENDADAS (F7 · §6)
+   Plugin @capacitor/local-notifications — disparam com o app fechado.
+   Offsets: 24h, 12h, 6h, 1h, 30min antes do compromisso.
+   Toggle por compromisso (campo ag.notifOn, default true).
+   No navegador (PWA) tudo isto é no-op; vale o fallback local acima.
+   ================================================================ */
+
+var _NOTIF_OFFSETS = [
+  { min: 1440, txt: 'amanhã' },
+  { min: 720,  txt: 'em 12 horas' },
+  { min: 360,  txt: 'em 6 horas' },
+  { min: 60,   txt: 'em 1 hora' },
+  { min: 30,   txt: 'em 30 minutos' }
+];
+
+function capNativo() {
+  return !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function'
+    && window.Capacitor.isNativePlatform());
+}
+function pluginLN() {
+  return (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.LocalNotifications) || null;
+}
+
+/* id inteiro estável a partir do id-string do agendamento + índice do offset */
+function _hashStr(s) {
+  var h = 0; s = String(s);
+  for (var i = 0; i < s.length; i++) { h = (h * 31 + s.charCodeAt(i)) | 0; }
+  return Math.abs(h) % 100000;
+}
+function _notifIdsAg(ag) {
+  var base = _hashStr(ag.id);
+  return _NOTIF_OFFSETS.map(function(_, i) { return base * 10 + i; });
+}
+
+function _dataHoraAg(ag) {
+  var d = ag.data.split('-'), h = (ag.hora || '00:00').split(':');
+  return new Date(parseInt(d[0]), parseInt(d[1]) - 1, parseInt(d[2]),
+    parseInt(h[0]) || 0, parseInt(h[1]) || 0, 0, 0);
+}
+
+function garantirPermissaoNotif() {
+  var LN = pluginLN();
+  if (!capNativo() || !LN) return Promise.resolve(false);
+  return LN.requestPermissions().then(function(r) {
+    return r && r.display === 'granted';
+  }).catch(function() { return false; });
+}
+
+/* (re)agenda as 5 notificações de um compromisso — cancela antes p/ evitar duplicidade */
+function agendarNotificacoesAg(ag) {
+  var LN = pluginLN();
+  if (!capNativo() || !LN) return Promise.resolve();
+
+  return cancelarNotificacoesAg(ag).then(function() {
+    /* desligado ou já concluído → não reagenda */
+    if (ag.notifOn === false || ag.concluido) return;
+
+    var base = _dataHoraAg(ag).getTime();
+    var agora = Date.now();
+    var ids = _notifIdsAg(ag);
+    var lista = [];
+    _NOTIF_OFFSETS.forEach(function(off, i) {
+      var at = base - off.min * 60000;
+      if (at <= agora) return; /* só futuro */
+      lista.push({
+        id: ids[i],
+        title: 'Compromisso ' + off.txt,
+        body: ag.cliente + ' · ' + (ag.desc || 'Não definido') + ' às ' + ag.hora,
+        schedule: { at: new Date(at), allowWhileIdle: true }
+      });
+    });
+    if (lista.length === 0) return;
+    return LN.schedule({ notifications: lista });
+  }).catch(function(e) { console.error('agendarNotif', e); });
+}
+
+function cancelarNotificacoesAg(ag) {
+  var LN = pluginLN();
+  if (!capNativo() || !LN) return Promise.resolve();
+  var ids = _notifIdsAg(ag).map(function(id) { return { id: id }; });
+  return LN.cancel({ notifications: ids }).catch(function() {});
+}
+
+/* reagenda tudo no boot (datas mudam, app reinstalado, etc.) */
+function reagendarTodasNotificacoes() {
+  if (!capNativo() || !pluginLN()) return;
+  garantirPermissaoNotif().then(function() {
+    agendamentos.forEach(function(a) { agendarNotificacoesAg(a); });
+  });
+}
+
+/* ================================================================
    AGENDAMENTOS
    ================================================================ */
 
@@ -697,11 +811,11 @@ function renderAgenda() {
   ordem.forEach(function(data) {
     html += '<div class="agenda-day-label">' + _dataLabel(data) + '</div>';
     grupos[data].forEach(function(a) {
-      html += '<div class="agenda-event-row" onclick="abrirDetalheAgendamento(\'' + a.id + '\')" style="cursor:pointer;">'
+      html += '<div class="agenda-event-row' + (a.concluido ? ' concluido' : '') + '" onclick="abrirDetalheAgendamento(\'' + a.id + '\')" style="cursor:pointer;">'
         + '<div class="agenda-event-hora">' + esc(a.hora) + '</div>'
         + '<div class="agenda-event-bar"></div>'
         + '<div class="agenda-event-info">'
-        + '<div class="ev-desc">' + esc(a.desc) + '</div>'
+        + '<div class="ev-desc">' + (a.concluido ? '✓ ' : '') + esc(a.desc) + '</div>'
         + '<div class="ev-cli">' + esc(a.cliente) + '</div>'
         + '</div>'
         + '<button class="ag-del-btn" aria-label="Excluir compromisso" '
@@ -717,6 +831,7 @@ function excluirAgendamento(id) {
   var a = agendamentoById(id);
   if (!a) return;
   showConfirm('Excluir "' + a.desc + '" de ' + a.cliente + '? Esta ação não pode ser desfeita.', function() {
+    cancelarNotificacoesAg(a);
     agendamentos = agendamentos.filter(function(x) { return x.id !== id; });
     if (_agendamentoId === id) _agendamentoId = null;
     persistDelete('agendamentos', id, function() {
@@ -750,10 +865,10 @@ function renderHomeAgenda() {
   if (deHoje.length > 0) {
     html += '<div class="sub-label">HOJE</div>';
     deHoje.forEach(function(a) {
-      html += '<div class="agenda-card" onclick="abrirDetalheAgendamento(\'' + a.id + '\')" style="cursor:pointer;">'
+      html += '<div class="agenda-card' + (a.concluido ? ' concluido' : '') + '" onclick="abrirDetalheAgendamento(\'' + a.id + '\')" style="cursor:pointer;">'
         + '<div class="horario">' + esc(a.hora) + '</div>'
         + '<div class="cliente-name">' + esc(a.cliente) + '</div>'
-        + '<div class="descricao">' + esc(a.desc) + '</div>'
+        + '<div class="descricao">' + (a.concluido ? '✓ ' : '') + esc(a.desc) + '</div>'
         + '</div>';
     });
   }
@@ -763,10 +878,10 @@ function renderHomeAgenda() {
       var parts = a.data.split('-');
       var d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
       var horario = _diasAbrev[d.getDay()] + ', ' + a.hora;
-      html += '<div class="agenda-card" onclick="abrirDetalheAgendamento(\'' + a.id + '\')" style="cursor:pointer;">'
+      html += '<div class="agenda-card' + (a.concluido ? ' concluido' : '') + '" onclick="abrirDetalheAgendamento(\'' + a.id + '\')" style="cursor:pointer;">'
         + '<div class="horario">' + esc(horario) + '</div>'
         + '<div class="cliente-name">' + esc(a.cliente) + '</div>'
-        + '<div class="descricao">' + esc(a.desc) + '</div>'
+        + '<div class="descricao">' + (a.concluido ? '✓ ' : '') + esc(a.desc) + '</div>'
         + '</div>';
     });
   }
@@ -774,6 +889,34 @@ function renderHomeAgenda() {
     html = '<div style="color:#aaa;font-size:13px;padding:8px 0 12px;">Nenhum compromisso próximo.</div>';
   }
   container.innerHTML = html;
+}
+
+/* Home: 3 orçamentos mais recentes (§1) */
+function renderHomeOrcamentos() {
+  var container = document.getElementById('home-orc-list');
+  if (!container) return;
+
+  var items = orcamentos.slice().sort(function(a, b) {
+    return b.data.localeCompare(a.data);
+  }).slice(0, 3);
+
+  if (items.length === 0) {
+    container.innerHTML = '<div style="color:#aaa;font-size:13px;padding:4px 0 8px;">Nenhum orçamento ainda.</div>';
+    return;
+  }
+
+  container.innerHTML = items.map(function(o) {
+    var dataFmt = o.data.split('-').reverse().join('/');
+    return '<div class="orc-hist-row" onclick="abrirOrcDetalhe(\'' + o.id + '\')">'
+      + '<div class="orc-hist-left">'
+      + '<div class="orc-hist-nome">' + esc(clienteNome(o.clienteId)) + '</div>'
+      + '<div class="orc-hist-data">' + esc(resumoOrcamento(o)) + ' · ' + dataFmt + '</div>'
+      + '</div>'
+      + '<div class="orc-hist-right">'
+      + '<span class="orc-hist-val">' + fmtBR(o.total) + '</span>'
+      + '<span class="orc-hist-badge ' + o.status + '">' + (_orcStatusBadge[o.status] || o.status.toUpperCase()) + '</span>'
+      + '</div></div>';
+  }).join('');
 }
 
 var _agendamentoId = null;
@@ -801,13 +944,85 @@ function abrirDetalheAgendamento(id) {
     obsLabel.style.display = 'none';
     obsEl.style.display = 'none';
   }
+  atualizarBtnConcluido(a);
+  atualizarBtnNotif(a);
   goTo('screen-detalhe-agendamento');
+}
+
+function atualizarBtnConcluido(a) {
+  var btn = document.getElementById('det-concluido-btn');
+  if (!btn) return;
+  if (a.concluido) {
+    btn.textContent = '✓ CONCLUÍDO — DESFAZER';
+    btn.style.background = '#16a34a';
+    btn.style.boxShadow = 'none';
+  } else {
+    btn.textContent = 'MARCAR COMO CONCLUÍDO';
+    btn.style.background = '';
+    btn.style.boxShadow = '';
+  }
+}
+
+/* Criar orçamento a partir do compromisso (§5) — pré-preenche o cliente */
+function criarOrcamentoDoCompromisso() {
+  if (!_agendamentoId) return;
+  var a = agendamentoById(_agendamentoId);
+  if (!a) return;
+  novoOrcamento();
+  var sel = document.getElementById('orc-cliente-input');
+  if (sel) {
+    var achou = false;
+    for (var i = 0; i < clientes.length; i++) {
+      if (clientes[i].nome === a.cliente) { sel.value = clientes[i].id; achou = true; break; }
+    }
+    if (!achou) showToast('Cliente não cadastrado — selecione manualmente.');
+  }
+}
+
+function toggleConcluidoAgendamento() {
+  if (!_agendamentoId) return;
+  var a = agendamentoById(_agendamentoId);
+  if (!a) return;
+  a.concluido = !a.concluido;
+  persistPut('agendamentos', a, function() {
+    showToast(a.concluido ? 'Compromisso concluído!' : 'Marcação desfeita.');
+    atualizarBtnConcluido(a);
+    agendarNotificacoesAg(a); /* concluído cancela; desfazer reagenda */
+    renderAgenda();
+    renderHomeAgenda();
+  });
+}
+
+/* liga/desliga os lembretes de um compromisso (§6) */
+function toggleNotifAgendamento() {
+  if (!_agendamentoId) return;
+  var a = agendamentoById(_agendamentoId);
+  if (!a) return;
+  a.notifOn = (a.notifOn === false); /* undefined/true → false; false → true */
+  persistPut('agendamentos', a, function() {
+    showToast(a.notifOn ? 'Lembretes ativados.' : 'Lembretes desativados.');
+    atualizarBtnNotif(a);
+    agendarNotificacoesAg(a);
+  });
+}
+
+function atualizarBtnNotif(a) {
+  var btn = document.getElementById('det-notif-btn');
+  if (!btn) return;
+  /* só faz sentido no app nativo; no PWA some */
+  if (!capNativo()) { btn.style.display = 'none'; return; }
+  btn.style.display = 'block';
+  var on = a.notifOn !== false;
+  btn.textContent = on ? '🔔 LEMBRETES ATIVADOS' : '🔕 LEMBRETES DESATIVADOS';
+  btn.style.opacity = on ? '1' : '0.55';
 }
 
 function cancelarAgendamento() {
   if (!_agendamentoId) return;
   var id = _agendamentoId;
+  var ag = agendamentoById(id);
   showConfirm('Excluir este agendamento? Esta ação não pode ser desfeita.', function() {
+    if (ag) cancelarNotificacoesAg(ag);
     agendamentos = agendamentos.filter(function(a) { return a.id !== id; });
     _agendamentoId = null;
     persistDelete('agendamentos', id, function() {
@@ -853,19 +1068,26 @@ function salvarAgendamento() {
   var erro    = document.getElementById('ag-erro');
 
   if (!cliente) { erro.textContent = 'Selecione um cliente.'; erro.style.display = 'block'; return; }
-  if (!desc) { erro.textContent = 'Informe a descrição do serviço.'; erro.style.display = 'block'; return; }
   if (!data) { erro.textContent = 'Informe a data.'; erro.style.display = 'block'; return; }
   if (!hora) { erro.textContent = 'Informe o horário.'; erro.style.display = 'block'; return; }
   erro.style.display = 'none';
 
-  var ag = { id: _agEditId || novoId(), data: data, hora: hora, desc: desc, cliente: cliente, obs: obs };
+  /* descrição opcional (§8) — vazio vira 'Não definido' */
+  if (!desc) desc = 'Não definido';
+
+  var ag = { id: _agEditId || novoId(), data: data, hora: hora, desc: desc, cliente: cliente, obs: obs, concluido: false, notifOn: true };
   var idx = -1;
   for (var i = 0; i < agendamentos.length; i++) if (agendamentos[i].id === ag.id) idx = i;
+  if (idx >= 0) { /* preserva estado ao editar */
+    ag.concluido = !!agendamentos[idx].concluido;
+    ag.notifOn = agendamentos[idx].notifOn !== false;
+  }
   if (idx >= 0) agendamentos[idx] = ag; else agendamentos.push(ag);
   _agEditId = null;
 
   persistPut('agendamentos', ag, function() {
     showToast('Agendamento salvo!');
+    agendarNotificacoesAg(ag); /* (re)agenda os 5 lembretes nativos */
     document.getElementById('ag-cliente-input').selectedIndex = 0;
     document.getElementById('ag-desc-input').value = '';
     document.getElementById('ag-data-input').value = '';
@@ -1194,6 +1416,118 @@ function excluirCliente() {
       console.error('excluirCliente', e);
       showToast(ERRO_SALVAR);
     });
+  });
+}
+
+/* ================================================================
+   CONTATOS DO CELULAR (F7 · §2/§7)
+   Plugin @capacitor-community/contacts — lê a agenda do aparelho e
+   importa como cliente. "Novo no Celular" abre o app de contatos.
+   No navegador (PWA) o botão fica oculto.
+   ================================================================ */
+
+var _contatosTel = []; /* cache dos contatos lidos do aparelho */
+
+function pluginContacts() {
+  return (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Contacts) || null;
+}
+function pluginAppLauncher() {
+  return (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.AppLauncher) || null;
+}
+
+/* mostra o botão de contatos só quando rodando no app nativo */
+function ajustarBotaoContatos() {
+  var btn = document.getElementById('btn-contatos-tel');
+  if (btn) btn.style.display = capNativo() ? 'block' : 'none';
+}
+
+function abrirContatosTelefone() {
+  var C = pluginContacts();
+  if (!capNativo() || !C) {
+    showToast('Disponível apenas no app Android.');
+    return;
+  }
+  var listEl = document.getElementById('contatos-tel-list');
+  if (listEl) listEl.innerHTML = '<div class="empty-state">Carregando contatos…</div>';
+  goTo('screen-contatos-tel');
+
+  C.requestPermissions().then(function(p) {
+    if (!p || p.contacts !== 'granted') {
+      if (listEl) listEl.innerHTML = '<div class="empty-state">Permissão de contatos negada.<br/>Autorize nas configurações do app.</div>';
+      return;
+    }
+    return C.getContacts({
+      projection: { name: true, phones: true, postalAddresses: true }
+    }).then(function(res) {
+      _contatosTel = (res && res.contacts ? res.contacts : []).map(function(c) {
+        var pa = (c.postalAddresses && c.postalAddresses[0]) || {};
+        return {
+          nome: (c.name && (c.name.display || [c.name.given, c.name.family].filter(Boolean).join(' '))) || 'Sem nome',
+          telefone: (c.phones && c.phones[0] && c.phones[0].number) || '',
+          endereco: pa.street || '',
+          cidade: pa.city || ''
+        };
+      }).filter(function(c) { return c.nome !== 'Sem nome' || c.telefone; })
+        .sort(function(a, b) { return a.nome.localeCompare(b.nome); });
+      renderContatosTelefone();
+    });
+  }).catch(function(e) {
+    console.error('contatos', e);
+    if (listEl) listEl.innerHTML = '<div class="empty-state">Não foi possível ler os contatos.</div>';
+  });
+}
+
+function renderContatosTelefone() {
+  var listEl = document.getElementById('contatos-tel-list');
+  if (!listEl) return;
+  var q = (document.getElementById('contato-busca') || {}).value || '';
+  q = q.trim().toLowerCase();
+  var itens = _contatosTel.filter(function(c) {
+    return !q || c.nome.toLowerCase().indexOf(q) !== -1 || (c.telefone || '').indexOf(q) !== -1;
+  });
+  if (itens.length === 0) {
+    listEl.innerHTML = '<div class="empty-state">Nenhum contato' + (q ? ' encontrado.' : ' no aparelho.') + '</div>';
+    return;
+  }
+  listEl.innerHTML = itens.map(function(c) {
+    var orig = _contatosTel.indexOf(c);
+    return '<div class="cliente-row" onclick="importarContato(' + orig + ')" role="button" style="cursor:pointer;">'
+      + '<div class="avatar">' + esc(iniciais(c.nome)) + '</div>'
+      + '<div class="cliente-info"><div class="cnome">' + esc(c.nome) + '</div>'
+      + '<div class="ccel">' + esc(c.telefone || 'sem telefone') + '</div></div>'
+      + '<div style="margin-left:auto;color:var(--brand-dark);font-size:20px;font-weight:700;">＋</div>'
+      + '</div>';
+  }).join('');
+}
+
+function importarContato(i) {
+  var c = _contatosTel[i];
+  if (!c) return;
+  /* evita duplicar: mesmo nome + telefone já cadastrado */
+  var jaExiste = clientes.some(function(x) {
+    return x.nome === c.nome && (x.telefone || '') === (c.telefone || '');
+  });
+  if (jaExiste) { showToast('Cliente já cadastrado.'); goTo('screen-clientes'); return; }
+
+  var cli = {
+    id: novoId(), nome: c.nome, telefone: c.telefone || '',
+    endereco: c.endereco || '', bairro: '', cidade: c.cidade || '', obs: ''
+  };
+  clientes.push(cli);
+  persistPut('clientes', cli, function() {
+    showToast('Cliente importado!');
+    fillClienteSelects();
+    renderClientes();
+    goTo('screen-clientes');
+  });
+}
+
+/* abre o app de contatos do celular para criar um novo (§7) */
+function abrirAppContatos() {
+  var AL = pluginAppLauncher();
+  if (!capNativo() || !AL) { showToast('Disponível apenas no app Android.'); return; }
+  AL.openUrl({ url: 'content://contacts/people/' }).catch(function() {
+    showToast('Abra o app de Contatos do celular para adicionar. Depois puxe aqui pelos contatos.');
   });
 }
 
@@ -1627,7 +1961,7 @@ function gerarPdfOrcamento(o) {
     .toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
     + '-' + o.data + '.pdf';
-  doc.save(nomeArq);
+  entregarPdf(doc, nomeArq, 'o orçamento');
   return true;
 }
 
@@ -2057,7 +2391,7 @@ function goTo(id) {
   el.classList.add('active');
   var sb = el.querySelector('.scroll-body');
   if (sb) sb.scrollTop = 0;
-  if (id === 'screen-home') { renderHomeAgenda(); renderPayHome(); atualizarBadgeSino(); }
+  if (id === 'screen-home') { renderHomeAgenda(); renderHomeOrcamentos(); renderPayHome(); atualizarBadgeSino(); }
   if (id === 'screen-notificacoes') renderNotificacoes();
   if (id === 'screen-lista-orcamentos') renderListaOrcamentos();
   if (id === 'screen-perfil-eletricista') renderPerfilEletricista();
@@ -2066,7 +2400,7 @@ function goTo(id) {
   if (id === 'screen-picker-material') renderPickerMaterial();
   if (id === 'screen-agenda') { renderCalendar(); renderAgenda(); }
   if (id === 'screen-materiais') renderMateriais();
-  if (id === 'screen-clientes') renderClientes();
+  if (id === 'screen-clientes') { renderClientes(); ajustarBotaoContatos(); }
   if (id === 'screen-pagamentos') { renderPagamentos(); renderPaySummary(); }
 }
 
@@ -2154,8 +2488,10 @@ openDB().then(function() {
 }).then(function() {
   fillClienteSelects();
   renderHomeAgenda();
+  renderHomeOrcamentos();
   renderPayHome();
   atualizarBadgeSino();
+  reagendarTodasNotificacoes();
   aplicarToggles();
   verificarRelogio();
   dispararNotificacoesLocais();
