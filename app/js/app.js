@@ -34,6 +34,31 @@ function round2(v) {
   return Math.round((Number(v) + Number.EPSILON) * 100) / 100;
 }
 
+/* ── MÁSCARA MONETÁRIA ──
+   O usuário digita só dígitos; o campo formata sozinho da direita pra
+   esquerda (1 → 0,01 · 1250 → 12,50 · 132000 → 1.320,00). Substitui o
+   type="number", que no Android abre teclado com ponto/vírgula ambíguos
+   e aceita "1.5" querendo dizer "1,50". */
+
+/* string mascarada → número (12 reais e 50 centavos = 12.5) */
+function moedaParaNumero(str) {
+  var digitos = String(str == null ? '' : str).replace(/\D/g, '');
+  if (!digitos) return NaN;
+  return parseInt(digitos, 10) / 100;
+}
+
+/* número → string mascarada, sem o "R$" (o rótulo do campo já diz) */
+function numeroParaMoeda(v) {
+  if (v == null || isNaN(v)) return '';
+  return round2(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/* handler de oninput. Cap em 7 dígitos inteiros (R$ 9.999.999,99). */
+function mascaraMoeda(input) {
+  var digitos = input.value.replace(/\D/g, '').slice(0, 9);
+  input.value = digitos ? numeroParaMoeda(parseInt(digitos, 10) / 100) : '';
+}
+
 function esc(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -87,6 +112,37 @@ function confirmCancel() {
   var cb = _confirmCancelCb;
   _confirmCb = null; _confirmCancelCb = null;
   if (cb) cb();
+}
+
+/* ── MODAL DE TEXTO ──
+   Substitui prompt(), que bloqueia o WebView do Capacitor.
+   validar(valor) devolve string de erro, ou null se estiver ok. */
+var _textoCb = null;
+var _textoValidar = null;
+
+function showTextoModal(titulo, valorInicial, validar, cb) {
+  document.getElementById('texto-msg').textContent = titulo;
+  var input = document.getElementById('texto-input');
+  input.value = valorInicial || '';
+  document.getElementById('texto-erro').style.display = 'none';
+  document.getElementById('texto-modal').classList.add('show');
+  _textoCb = cb;
+  _textoValidar = validar || null;
+  setTimeout(function() { input.focus(); }, 50);
+}
+function textoOk() {
+  var valor = document.getElementById('texto-input').value.trim();
+  var erroEl = document.getElementById('texto-erro');
+  var erro = _textoValidar ? _textoValidar(valor) : (valor ? null : 'Campo obrigatório.');
+  if (erro) { erroEl.textContent = erro; erroEl.style.display = 'block'; return; }
+  document.getElementById('texto-modal').classList.remove('show');
+  var cb = _textoCb;
+  _textoCb = null; _textoValidar = null;
+  if (cb) cb(valor);
+}
+function textoCancel() {
+  document.getElementById('texto-modal').classList.remove('show');
+  _textoCb = null; _textoValidar = null;
 }
 
 /* ── MODAL VENCIMENTO (fluxo APROVAR — SPEC §8.1) ── */
@@ -349,7 +405,7 @@ function salvarPagamento() {
   var clienteId = document.getElementById('pay-cliente-input').value;
   var servico = document.getElementById('pay-servico-input').value.trim();
   var valorRaw = document.getElementById('pay-valor-input').value;
-  var valor = parseFloat(valorRaw);
+  var valor = moedaParaNumero(valorRaw);
   var data = document.getElementById('pay-data-input').value;
   var formaEl = document.querySelector('#pay-forma-row .filter-chip.active');
   var statusEl = document.querySelector('#pay-status-row .filter-chip.active');
@@ -1160,12 +1216,121 @@ function materialById(id) {
 
 var _matEditId = null;
 
+/* ── CATEGORIAS DE MATERIAL (filtros) ──
+   Eram fixas no HTML. Agora vivem em `preferencias` e o usuário cria as
+   suas. As antigas continuam valendo como padrão para quem já tem
+   materiais gravados com elas. */
+
+var CATEGORIAS_PADRAO = ['FIOS', 'DISJUNTORES', 'TOMADAS', 'ILUMINAÇÃO', 'OUTROS'];
+var categorias = CATEGORIAS_PADRAO.slice();
+
+function carregarCategorias() {
+  if (!_dbOk) return Promise.resolve();
+  return dbGet('preferencias', 'categorias').then(function(p) {
+    if (p && Array.isArray(p.value) && p.value.length) categorias = p.value.slice();
+  }).catch(function() {}).then(function() {
+    /* material salvo com categoria que sumiu da lista não pode ficar
+       invisível no filtro — readiciona */
+    materiais.forEach(function(m) {
+      if (m.cat && categorias.indexOf(m.cat) === -1) categorias.push(m.cat);
+    });
+    renderChipsCategorias();
+  });
+}
+
+function salvarCategorias() {
+  renderChipsCategorias();
+  if (!_dbOk) return Promise.resolve();
+  return dbPut('preferencias', { key: 'categorias', value: categorias })
+    .catch(function(e) { console.error('categorias', e); showToast(ERRO_SALVAR); });
+}
+
+/* Redesenha as duas linhas de chips preservando o que estava selecionado. */
+function renderChipsCategorias() {
+  var filtroRow = document.getElementById('mat-filter-row');
+  if (filtroRow) {
+    var chipAtivo = filtroRow.querySelector('.filter-chip.active');
+    var ativo = (chipAtivo && chipAtivo.getAttribute('data-cat')) || 'TODOS';
+    if (ativo !== 'TODOS' && categorias.indexOf(ativo) === -1) ativo = 'TODOS';
+    filtroRow.innerHTML = ['TODOS'].concat(categorias).map(function(c) {
+      return '<div class="filter-chip' + (c === ativo ? ' active' : '') + '"'
+        + ' data-cat="' + esc(c) + '" onclick="filterMateriais(this)" role="button">'
+        + esc(c) + '</div>';
+    }).join('');
+  }
+
+  var catRow = document.getElementById('mat-cat-row');
+  if (catRow) {
+    var chipSel = catRow.querySelector('.filter-chip.active');
+    var sel = chipSel && chipSel.getAttribute('data-cat');
+    if (categorias.indexOf(sel) === -1) sel = categorias[0];
+    catRow.innerHTML = categorias.map(function(c) {
+      /* só as criadas pelo usuário podem ser removidas — as padrão são
+         referenciadas pelos materiais semeados */
+      var removivel = CATEGORIAS_PADRAO.indexOf(c) === -1;
+      return '<div class="filter-chip' + (c === sel ? ' active' : '') + '"'
+        + ' data-cat="' + esc(c) + '" onclick="selectCategoria(this)" role="button">'
+        + '<span>' + esc(c) + '</span>'
+        + (removivel
+            ? '<span class="chip-x" role="button" aria-label="Excluir categoria ' + esc(c) + '"'
+              + ' onclick="event.stopPropagation();excluirCategoria(this.parentNode.getAttribute(\'data-cat\'))">✕</span>'
+            : '')
+        + '</div>';
+    }).join('')
+      + '<div class="filter-chip nova" onclick="novaCategoria()" role="button"'
+      + ' aria-label="Criar nova categoria">+ NOVA</div>';
+  }
+}
+
+function novaCategoria() {
+  showTextoModal('Nova categoria de material', '', function(v) {
+    if (!v) return 'Informe o nome da categoria.';
+    if (v.length < 2) return 'Nome muito curto.';
+    var existe = categorias.some(function(c) { return c.toUpperCase() === v.toUpperCase(); });
+    if (existe) return 'Essa categoria já existe.';
+    return null;
+  }, function(v) {
+    var nome = v.toUpperCase();
+    /* 'OUTROS' fica sempre por último — é o balde do que não se encaixa */
+    var iOutros = categorias.indexOf('OUTROS');
+    if (iOutros === -1) categorias.push(nome);
+    else categorias.splice(iOutros, 0, nome);
+
+    salvarCategorias().then(function() {
+      /* já deixa a nova selecionada no formulário aberto */
+      var catRow = document.getElementById('mat-cat-row');
+      if (!catRow) return;
+      catRow.querySelectorAll('.filter-chip').forEach(function(ch) {
+        ch.classList.toggle('active', ch.getAttribute('data-cat') === nome);
+      });
+      showToast('Categoria "' + nome + '" criada.');
+    });
+  });
+}
+
+/* Remove uma categoria vazia. Categoria em uso não sai — os materiais
+   dela ficariam sem filtro. */
+function excluirCategoria(nome) {
+  var emUso = materiais.filter(function(m) { return m.cat === nome; });
+  if (emUso.length > 0) {
+    showToast(emUso.length + ' material(is) usam "' + nome + '". Mude a categoria deles primeiro.');
+    return;
+  }
+  showConfirm('Excluir a categoria "' + nome + '"?', function() {
+    categorias = categorias.filter(function(c) { return c !== nome; });
+    salvarCategorias().then(function() {
+      renderMateriais();
+      showToast('Categoria excluída.');
+    });
+  });
+}
+
 function renderMateriais() {
   var list = document.getElementById('mat-list');
   if (!list) return;
   var busca = (document.getElementById('mat-busca') || {}).value || '';
   var activeChip = document.querySelector('#mat-filter-row .filter-chip.active');
-  var filtro = activeChip ? activeChip.textContent : 'TODOS';
+  var filtro = activeChip ? (activeChip.getAttribute('data-cat') || activeChip.textContent) : 'TODOS';
 
   var items = materiais.filter(function(m) {
     var matchCat = filtro === 'TODOS' || m.cat === filtro;
@@ -1211,10 +1376,10 @@ function editarMaterial(id) {
   var ex = document.getElementById('mat-excluir-btn');
   if (ex) ex.style.display = 'block';
   document.getElementById('mat-nome-input').value = m.nome;
-  document.getElementById('mat-preco-input').value = m.preco;
+  document.getElementById('mat-preco-input').value = numeroParaMoeda(m.preco);
   document.getElementById('mat-unid-input').value = m.unit;
   document.querySelectorAll('#mat-cat-row .filter-chip').forEach(function(c) {
-    c.classList.toggle('active', c.textContent === m.cat);
+    c.classList.toggle('active', c.getAttribute('data-cat') === m.cat);
   });
   document.getElementById('mat-erro').style.display = 'none';
   document.getElementById('mat-form-title').textContent = 'Editar Material';
@@ -1253,9 +1418,9 @@ function salvarMaterial() {
   var nome = document.getElementById('mat-nome-input').value.trim();
   var unid = document.getElementById('mat-unid-input').value;
   var precoRaw = document.getElementById('mat-preco-input').value;
-  var preco = parseFloat(precoRaw);
+  var preco = moedaParaNumero(precoRaw);
   var catEl = document.querySelector('#mat-cat-row .filter-chip.active');
-  var cat = catEl ? catEl.textContent : 'OUTROS';
+  var cat = (catEl && catEl.getAttribute('data-cat')) || 'OUTROS';
   var erro = document.getElementById('mat-erro');
 
   if (!nome) { erro.textContent = 'Informe o nome do material.'; erro.style.display = 'block'; return; }
@@ -1304,9 +1469,17 @@ function renderClientes() {
   }
 
   list.innerHTML = items.map(function(c) {
-    return '<div class="cliente-row" onclick="abrirPerfilCliente(\'' + c.id + '\')">'
+    var sub = c.contatoId
+      ? '<div class="cliente-sync">📱 da agenda do celular</div>'
+      : '';
+    return '<div class="cliente-row" onclick="abrirPerfilCliente(\'' + c.id + '\')" role="button" aria-label="Abrir ' + esc(c.nome) + '">'
       + '<div class="avatar">' + esc(iniciais(c.nome)) + '</div>'
-      + '<div class="cliente-info"><div class="cnome">' + esc(c.nome) + '</div><div class="ccel">' + esc(c.telefone) + '</div></div>'
+      + '<div class="cliente-info">'
+      + '<div class="cnome">' + esc(c.nome) + '</div>'
+      + '<div class="ccel">' + esc(c.telefone || 'sem telefone') + '</div>'
+      + sub
+      + '</div>'
+      + '<div class="cliente-chevron" aria-hidden="true">›</div>'
       + '</div>';
   }).join('');
 }
@@ -1314,9 +1487,18 @@ function renderClientes() {
 var _orcStatusBadge = { rascunho: 'RASCUNHO', enviado: 'ENVIADO', aprovado: 'APROVADO', recusado: 'RECUSADO' };
 
 function abrirPerfilCliente(id) {
+  if (!clienteById(id)) return;
+  _perfilClienteId = id;
+  renderPerfilCliente();
+  goTo('screen-perfil-cliente');
+}
+
+/* separado de abrirPerfilCliente para que o goTo() possa redesenhar a
+   tela quando ela é alcançada pelo botão de voltar */
+function renderPerfilCliente() {
+  var id = _perfilClienteId;
   var c = clienteById(id);
   if (!c) return;
-  _perfilClienteId = id;
 
   document.getElementById('pc-avatar').textContent = iniciais(c.nome);
   document.getElementById('pc-nome').textContent = c.nome;
@@ -1355,7 +1537,6 @@ function abrirPerfilCliente(id) {
         + '</div></div>';
     }).join('');
   }
-  goTo('screen-perfil-cliente');
 }
 
 function abrirPerfilPorNome(nome) {
@@ -1420,13 +1601,22 @@ function excluirCliente() {
 }
 
 /* ================================================================
-   CONTATOS DO CELULAR (F7 · §2/§7)
-   Plugin @capacitor-community/contacts — lê a agenda do aparelho e
-   importa como cliente. "Novo no Celular" abre o app de contatos.
-   No navegador (PWA) o botão fica oculto.
-   ================================================================ */
+   CONTATOS DO CELULAR — FONTE DE VERDADE DOS CLIENTES
 
-var _contatosTel = []; /* cache dos contatos lidos do aparelho */
+   A agenda do aparelho manda. O store `clientes` é um espelho dela,
+   não um cadastro paralelo: existe só porque orçamentos, pagamentos e
+   agendamentos precisam de um `clienteId` estável, que o id do contato
+   do Android não garante (muda em restore/troca de aparelho).
+
+   Cada cliente espelhado guarda `contatoId`. O sync casa por ele; se o
+   contato for renomeado no celular, o cliente é atualizado e o histórico
+   segue ligado. Cliente sem `contatoId` é local (PWA ou legado) e nunca
+   é tocado pelo sync.
+
+   Criar cliente é sempre no app de Contatos do Android — o app só
+   redireciona. No navegador (PWA), onde não há agenda, o formulário
+   interno continua disponível como alternativa.
+   ================================================================ */
 
 function pluginContacts() {
   return (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Contacts) || null;
@@ -1435,100 +1625,150 @@ function pluginAppLauncher() {
   return (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.AppLauncher) || null;
 }
 
-/* mostra o botão de contatos só quando rodando no app nativo */
+/* rótulo/estado da barra de sync na tela de clientes */
 function ajustarBotaoContatos() {
   var btn = document.getElementById('btn-contatos-tel');
   if (btn) btn.style.display = capNativo() ? 'block' : 'none';
+  var fab = document.getElementById('cli-fab-label');
+  if (fab) fab.innerHTML = capNativo() ? 'Novo no<br/>Celular' : 'Adicionar<br/>Cliente';
 }
 
-function abrirContatosTelefone() {
+/* Lê a agenda e normaliza para o shape de cliente. */
+function lerContatosDoAparelho() {
   var C = pluginContacts();
-  if (!capNativo() || !C) {
-    showToast('Disponível apenas no app Android.');
-    return;
-  }
-  var listEl = document.getElementById('contatos-tel-list');
-  if (listEl) listEl.innerHTML = '<div class="empty-state">Carregando contatos…</div>';
-  goTo('screen-contatos-tel');
+  if (!capNativo() || !C) return Promise.resolve(null);
 
-  C.requestPermissions().then(function(p) {
-    if (!p || p.contacts !== 'granted') {
-      if (listEl) listEl.innerHTML = '<div class="empty-state">Permissão de contatos negada.<br/>Autorize nas configurações do app.</div>';
-      return;
-    }
-    return C.getContacts({
-      projection: { name: true, phones: true, postalAddresses: true }
-    }).then(function(res) {
-      _contatosTel = (res && res.contacts ? res.contacts : []).map(function(c) {
+  return C.checkPermissions()
+    .then(function(p) {
+      if (p && p.contacts === 'granted') return p;
+      return C.requestPermissions();
+    })
+    .then(function(p) {
+      if (!p || p.contacts !== 'granted') return null;
+      return C.getContacts({ projection: { name: true, phones: true, postalAddresses: true } });
+    })
+    .then(function(res) {
+      if (!res) return null;
+      return (res.contacts || []).map(function(c) {
         var pa = (c.postalAddresses && c.postalAddresses[0]) || {};
+        var nome = (c.name && (c.name.display || [c.name.given, c.name.family].filter(Boolean).join(' '))) || '';
         return {
-          nome: (c.name && (c.name.display || [c.name.given, c.name.family].filter(Boolean).join(' '))) || 'Sem nome',
+          contatoId: String(c.contactId),
+          nome: nome.trim(),
           telefone: (c.phones && c.phones[0] && c.phones[0].number) || '',
           endereco: pa.street || '',
           cidade: pa.city || ''
         };
-      }).filter(function(c) { return c.nome !== 'Sem nome' || c.telefone; })
-        .sort(function(a, b) { return a.nome.localeCompare(b.nome); });
-      renderContatosTelefone();
+      }).filter(function(c) { return c.nome && c.telefone; });
     });
+}
+
+/* Espelha a agenda no store `clientes`. Insere os novos, atualiza os que
+   mudaram, e não mexe em nada que o usuário digitou só aqui (bairro/obs).
+   Silencioso: roda no boot e não deve incomodar se a permissão for negada. */
+var _syncEmAndamento = false;
+
+function sincronizarContatos(interativo) {
+  if (_syncEmAndamento) return Promise.resolve();
+  _syncEmAndamento = true;
+
+  return lerContatosDoAparelho().then(function(doAparelho) {
+    if (!doAparelho) {
+      if (interativo) showToast('Permissão de contatos negada. Autorize nas configurações do app.');
+      return;
+    }
+
+    var porContatoId = {};
+    clientes.forEach(function(c) { if (c.contatoId) porContatoId[c.contatoId] = c; });
+
+    var aGravar = [];
+    doAparelho.forEach(function(ct) {
+      var existente = porContatoId[ct.contatoId];
+
+      if (!existente) {
+        /* primeiro sync de um app que já tinha clientes digitados à mão:
+           adota o cliente local de mesmo nome em vez de duplicá-lo */
+        var orfao = null;
+        clientes.forEach(function(c) {
+          if (!c.contatoId && c.nome.toLowerCase() === ct.nome.toLowerCase()) orfao = c;
+        });
+        if (orfao) {
+          orfao.contatoId = ct.contatoId;
+          orfao.nome = ct.nome;
+          orfao.telefone = ct.telefone;
+          if (ct.endereco) orfao.endereco = ct.endereco;
+          if (ct.cidade) orfao.cidade = ct.cidade;
+          aGravar.push(orfao);
+        } else {
+          var novo = {
+            id: novoId(), contatoId: ct.contatoId,
+            nome: ct.nome, telefone: ct.telefone,
+            endereco: ct.endereco, bairro: '', cidade: ct.cidade, obs: ''
+          };
+          clientes.push(novo);
+          aGravar.push(novo);
+        }
+        return;
+      }
+
+      /* já espelhado: só grava se o celular realmente mudou algo */
+      var mudou = existente.nome !== ct.nome || existente.telefone !== ct.telefone;
+      if (ct.endereco && existente.endereco !== ct.endereco) mudou = true;
+      if (ct.cidade && existente.cidade !== ct.cidade) mudou = true;
+      if (!mudou) return;
+
+      existente.nome = ct.nome;
+      existente.telefone = ct.telefone;
+      if (ct.endereco) existente.endereco = ct.endereco;
+      if (ct.cidade) existente.cidade = ct.cidade;
+      aGravar.push(existente);
+    });
+
+    if (aGravar.length === 0) {
+      if (interativo) showToast('Contatos já estavam em dia.');
+      return;
+    }
+
+    var aplicar = function() {
+      fillClienteSelects();
+      if (activeScreenId() === 'screen-clientes') renderClientes();
+      if (interativo) showToast(aGravar.length + ' contato(s) sincronizado(s).');
+    };
+
+    if (!_dbOk) { aplicar(); return; }
+    return dbPutMany(aGravar.map(function(c) { return { store: 'clientes', obj: c }; }))
+      .then(aplicar)
+      .catch(function(e) {
+        console.error('sincronizarContatos', e);
+        if (interativo) showToast(ERRO_SALVAR);
+      });
   }).catch(function(e) {
-    console.error('contatos', e);
-    if (listEl) listEl.innerHTML = '<div class="empty-state">Não foi possível ler os contatos.</div>';
+    console.error('sincronizarContatos', e);
+    if (interativo) showToast('Não foi possível ler os contatos do celular.');
+  }).then(function() {
+    _syncEmAndamento = false;
   });
 }
 
-function renderContatosTelefone() {
-  var listEl = document.getElementById('contatos-tel-list');
-  if (!listEl) return;
-  var q = (document.getElementById('contato-busca') || {}).value || '';
-  q = q.trim().toLowerCase();
-  var itens = _contatosTel.filter(function(c) {
-    return !q || c.nome.toLowerCase().indexOf(q) !== -1 || (c.telefone || '').indexOf(q) !== -1;
-  });
-  if (itens.length === 0) {
-    listEl.innerHTML = '<div class="empty-state">Nenhum contato' + (q ? ' encontrado.' : ' no aparelho.') + '</div>';
-    return;
-  }
-  listEl.innerHTML = itens.map(function(c) {
-    var orig = _contatosTel.indexOf(c);
-    return '<div class="cliente-row" onclick="importarContato(' + orig + ')" role="button" style="cursor:pointer;">'
-      + '<div class="avatar">' + esc(iniciais(c.nome)) + '</div>'
-      + '<div class="cliente-info"><div class="cnome">' + esc(c.nome) + '</div>'
-      + '<div class="ccel">' + esc(c.telefone || 'sem telefone') + '</div></div>'
-      + '<div style="margin-left:auto;color:var(--brand-dark);font-size:20px;font-weight:700;">＋</div>'
-      + '</div>';
-  }).join('');
+/* botão da tela de clientes */
+function abrirContatosTelefone() {
+  if (!capNativo()) { showToast('Disponível apenas no app Android.'); return; }
+  showToast('Sincronizando…');
+  sincronizarContatos(true);
 }
 
-function importarContato(i) {
-  var c = _contatosTel[i];
-  if (!c) return;
-  /* evita duplicar: mesmo nome + telefone já cadastrado */
-  var jaExiste = clientes.some(function(x) {
-    return x.nome === c.nome && (x.telefone || '') === (c.telefone || '');
-  });
-  if (jaExiste) { showToast('Cliente já cadastrado.'); goTo('screen-clientes'); return; }
-
-  var cli = {
-    id: novoId(), nome: c.nome, telefone: c.telefone || '',
-    endereco: c.endereco || '', bairro: '', cidade: c.cidade || '', obs: ''
-  };
-  clientes.push(cli);
-  persistPut('clientes', cli, function() {
-    showToast('Cliente importado!');
-    fillClienteSelects();
-    renderClientes();
-    goTo('screen-clientes');
-  });
-}
-
-/* abre o app de contatos do celular para criar um novo (§7) */
-function abrirAppContatos() {
+/* FAB da tela de clientes: cria o contato no celular, nunca no app.
+   O sync do próximo boot (ou o botão SINCRONIZAR) traz ele pra cá. */
+function novoContatoNoCelular() {
+  if (!capNativo()) { novoCliente(); return; }
   var AL = pluginAppLauncher();
-  if (!capNativo() || !AL) { showToast('Disponível apenas no app Android.'); return; }
-  AL.openUrl({ url: 'content://contacts/people/' }).catch(function() {
-    showToast('Abra o app de Contatos do celular para adicionar. Depois puxe aqui pelos contatos.');
-  });
+  var fallback = function() {
+    showToast('Abra o app de Contatos do celular para adicionar, depois toque em SINCRONIZAR.');
+  };
+  if (!AL) { fallback(); return; }
+  /* INSERT abre direto o formulário de novo contato; se o aparelho não
+     tratar essa intent, cai na lista de contatos. */
+  AL.openUrl({ url: 'content://contacts/people/' }).catch(fallback);
 }
 
 function novoCliente() {
@@ -1648,7 +1888,9 @@ function renderOrcamento() {
         var unit = m.unit === 'metro' ? 'metro' : 'un.';
         return '<div class="orc-item-row">'
           + '<div><div class="orc-item-nome">' + esc(m.nome) + '</div><div class="orc-item-preco">R$ ' + preco + ' / ' + unit + '</div></div>'
-          + '<div class="orc-item-qty">' + m.qty + '</div>'
+          + '<input class="orc-qty-input" type="number" inputmode="numeric" min="1" max="99999"'
+          + ' value="' + m.qty + '" aria-label="Quantidade de ' + esc(m.nome) + '"'
+          + ' onchange="alterarQtdMatOrc(' + i + ', this.value)">'
           + '<div class="orc-item-total">R$ ' + total + '</div>'
           + '<div class="orc-item-x" onclick="removerMatOrc(' + i + ')" role="button" aria-label="Remover material">✕</div>'
           + '</div>';
@@ -1678,6 +1920,18 @@ function renderOrcamento() {
   var el3 = document.getElementById('orc-total-geral'); if (el3) el3.textContent = fmtBR(totalMat + totalMob);
 }
 
+/* Edição da qtd direto na linha. Zero/vazio não remove silenciosamente —
+   volta pra 1, porque remover é ação destrutiva e tem confirmação própria. */
+function alterarQtdMatOrc(i, valor) {
+  var item = orcamentoAtual.materiais[i];
+  if (!item) return;
+  var qty = parseInt(valor, 10);
+  if (isNaN(qty) || qty < 1) qty = 1;
+  if (qty > 99999) qty = 99999;
+  item.qty = qty;
+  renderOrcamento();
+}
+
 function removerMatOrc(i) {
   showConfirm('Remover este material do orçamento?', function() {
     orcamentoAtual.materiais.splice(i, 1); renderOrcamento();
@@ -1696,7 +1950,7 @@ function toggleFormMob() {
 
 function adicionarMobOrc() {
   var nome = document.getElementById('mob-nome-input').value.trim();
-  var valor = parseFloat(document.getElementById('mob-valor-input').value);
+  var valor = moedaParaNumero(document.getElementById('mob-valor-input').value);
   if (!nome || isNaN(valor) || valor <= 0) return;
   orcamentoAtual.maoDeObra.push({ nome: nome, valor: valor });
   document.getElementById('mob-nome-input').value = '';
@@ -2057,8 +2311,17 @@ function renderListaOrcamentos() {
       + '<div class="orc-hist-right">'
       + '<span class="orc-hist-val">' + fmtBR(o.total) + '</span>'
       + '<span class="orc-hist-badge ' + o.status + '">' + (_orcStatusBadge[o.status] || o.status.toUpperCase()) + '</span>'
+      + '<button class="ag-del-btn" aria-label="Excluir orçamento" '
+      + 'onclick="event.stopPropagation();excluirOrcamentoDaLista(\'' + o.id + '\')">✕</button>'
       + '</div></div>';
   }).join('');
+}
+
+/* atalho de exclusão direto na lista — reusa a confirmação do detalhe.
+   Como o detalhe não chegou a abrir, o navBack() do fluxo mantém a lista. */
+function excluirOrcamentoDaLista(id) {
+  _orcDetalheId = id;
+  excluirOrcamento();
 }
 
 /* ── DETALHE DO ORÇAMENTO ── */
@@ -2075,15 +2338,6 @@ function abrirOrcDetalhe(id) {
   goTo('screen-orcamento-detalhe');
 }
 
-function voltarDoOrcDetalhe() {
-  if (_odReturn === 'screen-perfil-cliente' && _perfilClienteId) {
-    abrirPerfilCliente(_perfilClienteId);
-  } else if (_odReturn === 'screen-lista-orcamentos' || _odReturn === 'screen-notificacoes') {
-    goTo(_odReturn);
-  } else {
-    goTo('screen-home');
-  }
-}
 
 function renderOrcDetalhe() {
   var o = orcamentoById(_orcDetalheId);
@@ -2139,6 +2393,63 @@ function renderOrcDetalhe() {
   } else {
     btns.innerHTML = '<div class="empty-state" style="flex:1;padding:4px 0;">Orçamento recusado — somente leitura.</div>';
   }
+}
+
+/* Excluir orçamento — permitido em qualquer status.
+   Um orçamento aprovado já gerou Pagamento (SPEC §8.1): apagar só o
+   orçamento deixaria a cobrança órfã, então o pagamento vinculado vai
+   junto, na MESMA transação, e o aviso diz quanto deixa de ser cobrado. */
+function excluirOrcamento() {
+  var o = orcamentoById(_orcDetalheId);
+  if (!o) return;
+
+  var pagsVinculados = pagamentos.filter(function(p) { return p.orcamentoId === o.id; });
+  var emAberto = pagsVinculados.filter(function(p) { return statusPagamento(p) !== 'pago'; });
+
+  var msg = 'Excluir o orçamento de ' + clienteNome(o.clienteId)
+    + ' (' + fmtBR(o.total) + ')?';
+  if (pagsVinculados.length > 0) {
+    msg += ' O pagamento gerado por ele também será apagado.';
+    if (emAberto.length > 0) {
+      var total = emAberto.reduce(function(s, p) { return s + p.valor; }, 0);
+      msg += ' ATENÇÃO: há ' + fmtBR(total) + ' em aberto que deixará de ser cobrado.';
+    }
+  }
+  msg += ' Esta ação não pode ser desfeita.';
+
+  showConfirm(msg, function() {
+    var aplicarMemoria = function() {
+      orcamentos = orcamentos.filter(function(x) { return x.id !== o.id; });
+      pagamentos = pagamentos.filter(function(p) { return p.orcamentoId !== o.id; });
+      var noDetalhe = activeScreenId() === 'screen-orcamento-detalhe';
+      _orcDetalheId = null;
+      showToast('Orçamento excluído.');
+
+      if (noDetalhe) {
+        /* a tela aberta mostra um orçamento que não existe mais — sai dela */
+        if (!navBack()) goTo('screen-home');
+        /* goTo re-renderiza home e lista; perfil do cliente não tem hook */
+        if (activeScreenId() === 'screen-perfil-cliente' && _perfilClienteId) {
+          abrirPerfilCliente(_perfilClienteId);
+        }
+      } else {
+        /* excluído pela lista: fica onde está, só atualiza */
+        renderListaOrcamentos();
+        renderHomeOrcamentos();
+      }
+    };
+    if (!_dbOk) {
+      showToast('Armazenamento indisponível — alteração não será salva.');
+      aplicarMemoria();
+      return;
+    }
+    var itens = [{ store: 'orcamentos', key: o.id }];
+    pagsVinculados.forEach(function(p) { itens.push({ store: 'pagamentos', key: p.id }); });
+    dbDeleteMany(itens).then(aplicarMemoria).catch(function(e) {
+      console.error('excluirOrcamento', e);
+      showToast(ERRO_SALVAR);
+    });
+  });
 }
 
 function pdfDoDetalhe() {
@@ -2382,9 +2693,27 @@ function buscaGlobal() {
    NAVEGAÇÃO / CONFIG
    ================================================================ */
 
-function goTo(id) {
+/* Pilha de navegação. O botão físico de voltar do Android desempilha um
+   nível por vez; só sai do app quando já está na home (e ainda assim
+   pedindo confirmação com duplo toque). */
+var _navStack = ['screen-home'];
+
+function goTo(id, semEmpilhar) {
   var prev = document.querySelector('.screen.active');
   if (prev) _prevScreen = prev.id;
+
+  if (!semEmpilhar && prev && prev.id !== id) {
+    if (id === 'screen-home') {
+      _navStack = ['screen-home'];        /* home é a raiz — zera a pilha */
+    } else {
+      var jaNaPilha = _navStack.indexOf(id);
+      /* voltou a uma tela que já estava na pilha (ex.: picker → orçamento):
+         trunca em vez de empilhar de novo, senão o voltar fica em loop */
+      if (jaNaPilha !== -1) _navStack.length = jaNaPilha + 1;
+      else _navStack.push(id);
+    }
+  }
+
   document.querySelectorAll('.screen').forEach(function(s) { s.classList.remove('active'); });
   var el = document.getElementById(id);
   if (!el) return;
@@ -2402,10 +2731,67 @@ function goTo(id) {
   if (id === 'screen-materiais') renderMateriais();
   if (id === 'screen-clientes') { renderClientes(); ajustarBotaoContatos(); }
   if (id === 'screen-pagamentos') { renderPagamentos(); renderPaySummary(); }
+  /* telas de detalhe: também são alcançadas pelo botão de voltar, e aí
+     ninguém chamou o abrir*() que as preenche */
+  if (id === 'screen-perfil-cliente' && _perfilClienteId) renderPerfilCliente();
+  if (id === 'screen-orcamento-detalhe' && _orcDetalheId) renderOrcDetalhe();
 }
 
+/* Volta um nível da pilha. Retorna false quando já está na raiz (home) —
+   quem chama decide o que fazer (o botão físico usa isso pra sair). */
+function navBack() {
+  /* modal aberto? o voltar fecha o modal, não navega */
+  if (fecharModalAberto()) return true;
+  if (_navStack.length <= 1) return false;
+  _navStack.pop();
+  goTo(_navStack[_navStack.length - 1], true);
+  return true;
+}
+
+/* mantido: telas antigas chamam history_back() no onclick */
 function history_back() {
-  goTo(_prevScreen);
+  if (!navBack()) goTo('screen-home');
+}
+
+/* Fecha o modal visível, se houver. true = fechou algo.
+   Passa pelos cancel() para que os callbacks pendentes sejam limpos. */
+function fecharModalAberto() {
+  var texto = document.getElementById('texto-modal');
+  if (texto && texto.classList.contains('show')) { textoCancel(); return true; }
+  var venc = document.getElementById('venc-modal');
+  if (venc && venc.classList.contains('show')) { vencCancel(); return true; }
+  var conf = document.getElementById('confirm-modal');
+  if (conf && conf.classList.contains('show')) { confirmCancel(); return true; }
+  return false;
+}
+
+/* ── BOTÃO FÍSICO DE VOLTAR (Android) ──
+   Sem isso o WebView trata o voltar como "sair do app" e mata a
+   activity na primeira tela secundária. */
+var _saidaArmada = false;
+
+function registrarBotaoVoltar() {
+  var App = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
+  if (App && App.addListener) {
+    App.addListener('backButton', function() {
+      if (navBack()) { _saidaArmada = false; return; }
+      /* já na home: exige dois toques em 2s pra sair */
+      if (_saidaArmada) { App.exitApp(); return; }
+      _saidaArmada = true;
+      showToast('Toque em voltar de novo para sair.');
+      setTimeout(function() { _saidaArmada = false; }, 2000);
+    });
+  }
+
+  /* PWA no navegador: o gesto/botão de voltar dispara popstate.
+     Mantemos sempre uma entrada extra no histórico pra consumir. */
+  try {
+    history.pushState({ eb: true }, '');
+    window.addEventListener('popstate', function() {
+      var tratou = navBack();
+      if (tratou || _navStack.length > 1) history.pushState({ eb: true }, '');
+    });
+  } catch (e) { /* history indisponível */ }
 }
 
 function toggleSwitch(el) {
@@ -2471,17 +2857,127 @@ function verificarRelogio() {
 }
 
 /* ================================================================
+   BACKUP / RESTAURAÇÃO
+
+   Rede de segurança para troca de aparelho e para o caso de o Android
+   exigir desinstalar o app (o que apaga o IndexedDB junto). Um único
+   arquivo .json com todos os stores.
+   ================================================================ */
+
+var BACKUP_STORES = ['clientes', 'materiais', 'orcamentos', 'agendamentos', 'pagamentos'];
+var BACKUP_VERSAO = 1;
+
+function exportarBackup() {
+  var dados = {
+    app: 'electricbudget',
+    versao: BACKUP_VERSAO,
+    exportadoEm: new Date().toISOString(),
+    clientes: clientes,
+    materiais: materiais,
+    orcamentos: orcamentos,
+    agendamentos: agendamentos,
+    pagamentos: pagamentos,
+    preferencias: { perfil: perfilEletricista, categorias: categorias }
+  };
+
+  var total = BACKUP_STORES.reduce(function(s, k) { return s + (dados[k] || []).length; }, 0);
+  if (total === 0) { showToast('Nada para exportar ainda.'); return; }
+
+  try {
+    var blob = new Blob([JSON.stringify(dados, null, 2)], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'electric-budget-backup-' + hojeLocal() + '.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
+    showToast(total + ' registros exportados.');
+  } catch (e) {
+    console.error('exportarBackup', e);
+    showToast('Não foi possível gerar o arquivo de backup.');
+  }
+}
+
+function importarBackup(input) {
+  var arq = input.files && input.files[0];
+  input.value = '';                       /* permite reimportar o mesmo arquivo */
+  if (!arq) return;
+
+  var reader = new FileReader();
+  reader.onerror = function() { showToast('Não foi possível ler o arquivo.'); };
+  reader.onload = function() {
+    var dados;
+    try { dados = JSON.parse(reader.result); }
+    catch (e) { showToast('Arquivo inválido — não é um backup do Electric Budget.'); return; }
+
+    if (!dados || dados.app !== 'electricbudget') {
+      showToast('Arquivo inválido — não é um backup do Electric Budget.');
+      return;
+    }
+
+    var total = BACKUP_STORES.reduce(function(s, k) {
+      return s + (Array.isArray(dados[k]) ? dados[k].length : 0);
+    }, 0);
+    if (total === 0) { showToast('O backup está vazio.'); return; }
+
+    var quando = dados.exportadoEm ? dados.exportadoEm.slice(0, 10).split('-').reverse().join('/') : 'data desconhecida';
+    showConfirm(
+      'Restaurar ' + total + ' registros do backup de ' + quando + '? '
+      + 'Registros com o mesmo id serão sobrescritos. Esta ação não pode ser desfeita.',
+      function() { aplicarBackup(dados); }
+    );
+  };
+  reader.readAsText(arq);
+}
+
+/* Merge por id (put), não wipe: um backup antigo não apaga o que foi
+   criado depois dele. Tudo numa transação só — ou entra inteiro, ou nada. */
+function aplicarBackup(dados) {
+  if (!_dbOk) { showToast('Armazenamento indisponível — não é possível restaurar.'); return; }
+
+  var itens = [];
+  BACKUP_STORES.forEach(function(store) {
+    (Array.isArray(dados[store]) ? dados[store] : []).forEach(function(obj) {
+      if (obj && obj.id) itens.push({ store: store, obj: obj });
+    });
+  });
+  var prefs = dados.preferencias || {};
+  if (prefs.perfil) itens.push({ store: 'preferencias', obj: { key: 'perfil', value: prefs.perfil } });
+  if (Array.isArray(prefs.categorias) && prefs.categorias.length) {
+    itens.push({ store: 'preferencias', obj: { key: 'categorias', value: prefs.categorias } });
+  }
+
+  dbPutMany(itens).then(function() {
+    /* re-hidrata da fonte de verdade em vez de remendar a memória */
+    return loadAll().then(carregarPerfilEletricista).then(carregarCategorias);
+  }).then(function() {
+    fillClienteSelects();
+    renderHomeAgenda();
+    renderHomeOrcamentos();
+    renderPayHome();
+    renderPerfilEletricista();
+    showToast('Backup restaurado!');
+  }).catch(function(e) {
+    console.error('aplicarBackup', e);
+    showToast('Falha ao restaurar o backup. Nada foi alterado.');
+  });
+}
+
+/* ================================================================
    INICIALIZAÇÃO
    Re-hidrata todos os stores antes do primeiro render (SPEC §4.2)
    ================================================================ */
 
 openDB().then(function() {
   _dbOk = true;
-  return seedIfEmpty().then(loadAll).then(carregarPerfilEletricista);
+  return seedIfEmpty().then(loadAll).then(carregarPerfilEletricista).then(carregarCategorias);
 }).catch(function(e) {
   console.error('IndexedDB indisponível:', e);
   _dbOk = false;
   seedMemory();
+  renderChipsCategorias();
   setTimeout(function() {
     showToast('Armazenamento indisponível — os dados não serão salvos neste navegador.');
   }, 500);
@@ -2495,6 +2991,8 @@ openDB().then(function() {
   aplicarToggles();
   verificarRelogio();
   dispararNotificacoesLocais();
+  registrarBotaoVoltar();
+  sincronizarContatos();
 });
 
 /* ── SERVICE WORKER (F4 — offline/instalável) ── */
