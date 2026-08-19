@@ -287,7 +287,7 @@
 <div class="form-section">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
 <span class="form-section-label">MATERIAIS</span>
-<span class="adicionar-link" onclick="goTo('screen-picker-material')">ADICIONAR +</span>
+<span class="adicionar-link" onclick="abrirPickerMaterial()">ADICIONAR +</span>
 </div>
 <div class="orc-table-header">
 <span>ITEM</span><span style="text-align:center;">QTD</span><span style="text-align:right;">TOTAL</span><span></span>
@@ -321,8 +321,8 @@
 <div style="height:16px;"></div>
 </div>
 <div class="dual-btns">
-<button class="dual-btn" onclick="salvarRascunho()" aria-label="Salvar como rascunho">RASCUNHO</button>
-<button class="dual-btn primary" onclick="salvarOrcamentoPDF()" aria-label="Salvar orçamento">SALVAR PDF</button>
+<button id="orc-btn-rascunho" class="dual-btn" onclick="salvarRascunho()" aria-label="Salvar como rascunho">RASCUNHO</button>
+<button id="orc-btn-pdf" class="dual-btn primary" onclick="salvarOrcamentoPDF()" aria-label="Salvar orçamento">SALVAR PDF</button>
 </div>
 </div>
 <!-- ===== PICKER MATERIAL ===== -->
@@ -335,9 +335,19 @@
 </div>
 </div>
 <div class="scroll-body">
-<div class="sub-label" style="margin-bottom:10px;">MATERIAIS CADASTRADOS</div>
+<div class="search-box">
+<span class="search-icon">🔍</span>
+<input id="picker-mat-busca" placeholder="Buscar material..." type="text" autocomplete="off" oninput="renderPickerMaterial()" aria-label="Buscar material"/>
+</div>
+<div class="clientes-count" id="picker-mat-count">0 MATERIAIS</div>
 <div id="picker-mat-list"></div>
 <div style="height:16px;"></div>
+</div>
+<div class="bottom-bar" style="justify-content:flex-end;">
+<div class="bottom-action" onclick="novoMaterialDoPicker()">
+<div class="fab">+</div>
+<div class="fab-label">Novo<br/>Material</div>
+</div>
 </div>
 </div>
 <!-- ===== PICKER CLIENTE ===== -->
@@ -586,6 +596,7 @@
 <div>
 <div class="orc-det-cliente" id="od-cliente"></div>
 <div class="orc-det-data" id="od-data"></div>
+<div class="orc-det-rev" id="od-rev" style="display:none;"></div>
 </div>
 <span class="status-badge" id="od-badge"></span>
 </div>

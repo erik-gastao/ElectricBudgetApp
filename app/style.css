@@ -233,6 +233,9 @@
   .field-row2 > div { flex: 1; }
   .full-btn { width: 100%; border: none; border-radius: 10px; padding: 12px 0; font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; background: linear-gradient(135deg, var(--brand) 0%, var(--brand-dark) 100%); color: #fff; cursor: pointer; transition: filter .12s; margin-top: 6px; box-shadow: 0 4px 12px rgba(217,137,10,0.35); }
   .full-btn:hover { filter: brightness(1.04); }
+  /* carimbo de revisão: o orçamento já foi enviado e mudou depois */
+  .orc-det-rev { font-size: 11px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase; color: var(--brand-dark); margin-top: 2px; }
+
   .dual-btns { display: flex; gap: 10px; padding: 12px 16px 20px; border-top: 1px solid #F0DDBB; background: var(--surface-alt); flex-shrink: 0; }
   .dual-btn { flex: 1; border: 1.5px solid var(--ink); border-radius: 10px; padding: 11px 0; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; background: #fff; color: var(--ink); cursor: pointer; transition: background .12s; }
   .dual-btn:hover { background: var(--surface-alt); }

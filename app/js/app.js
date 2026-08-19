@@ -626,9 +626,33 @@ function cobrarPagamento(id) {
   window.open('https://wa.me/' + fone + '?text=' + encodeURIComponent(msg), '_blank');
 }
 
-/* Entrega do PDF (§3) — pergunta "abrir?"; abre na tela ou baixa.
-   No Android nativo (F7) trocar por Filesystem + FileOpener. */
+/* ── ENTREGA DO PDF (§3 / F7) ──
+   No navegador o par <a download> + window.open(blob:) resolve. No
+   WebView do Android nenhum dos dois funciona: `download` é ignorado e
+   blob: não é URL que outro app consiga abrir — por isso o PDF "não
+   salvava nem abria" no APK. No nativo o arquivo vai pro disco pelo
+   Filesystem e é aberto pelo FileOpener (FileProvider), com Share como
+   plano B. */
+
+function pluginFilesystem() {
+  return (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem) || null;
+}
+function pluginFileOpener() {
+  return (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.FileOpener) || null;
+}
+function pluginShare() {
+  return (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Share) || null;
+}
+
 function entregarPdf(doc, nomeArq, label) {
+  if (capNativo() && pluginFilesystem()) { entregarPdfNativo(doc, nomeArq, label); return; }
+  if (capNativo()) {
+    diag('pdf: nativo sem plugin Filesystem — usando fallback web. Plugins: ' + diagPlugins());
+  }
+  entregarPdfWeb(doc, nomeArq, label);
+}
+
+function entregarPdfWeb(doc, nomeArq, label) {
   function baixar() {
     try { doc.save(nomeArq); } catch (e) { showToast('Falha ao salvar PDF.'); }
   }
@@ -641,6 +665,87 @@ function entregarPdf(doc, nomeArq, label) {
       setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
     } catch (e) { baixar(); }
   }, baixar);                                /* recusou abrir → baixa mesmo assim */
+}
+
+/* Valores da enum Directory do @capacitor/filesystem — vão pela ponte em
+   CAIXA ALTA; 'Documents' (como na API TypeScript) chega como diretório
+   desconhecido e a escrita falha.
+
+   A ordem é uma escada de degradação:
+   · DOCUMENTS  → pasta pública Documentos, a que o usuário acha sozinho.
+                  Pede permissão de armazenamento até a API 29 e pode ser
+                  recusada pelo armazenamento com escopo.
+   · EXTERNAL   → Android/data/<pkg>/files: não pede permissão nenhuma,
+                  ainda é visível no gerenciador de arquivos.
+   · CACHE      → sempre aceita; some quando o sistema limpa o cache.
+   Todos os três são cobertos pelo file_paths.xml, então o FileProvider
+   consegue entregar o content:// em qualquer um deles. */
+var _PDF_DIRS = ['DOCUMENTS', 'EXTERNAL', 'CACHE'];
+
+var _PDF_DIR_LABEL = {
+  DOCUMENTS: 'na pasta Documentos',
+  EXTERNAL: 'na pasta do app',
+  CACHE: 'na área temporária do app'
+};
+
+function _gravarPdfEm(FS, dirs, i, nomeArq, base64) {
+  if (i >= dirs.length) return Promise.reject(new Error('nenhum diretório aceitou a escrita'));
+  return FS.writeFile({ path: nomeArq, data: base64, directory: dirs[i], recursive: true })
+    .then(function(r) { return { uri: r && r.uri, dir: dirs[i] }; })
+    .catch(function(e) {
+      diag('pdf: escrita em ' + dirs[i] + ' falhou →', e);
+      return _gravarPdfEm(FS, dirs, i + 1, nomeArq, base64);
+    });
+}
+
+function entregarPdfNativo(doc, nomeArq, label) {
+  var FS = pluginFilesystem();
+  var base64;
+  try {
+    /* jsPDF devolve "data:application/pdf;filename=…;base64,XXXX" — o
+       Filesystem quer só o payload depois da vírgula. */
+    base64 = String(doc.output('datauristring')).split(',')[1];
+  } catch (e) {
+    diag('pdf: falha ao serializar →', e);
+    showToast('Falha ao gerar o PDF.');
+    return;
+  }
+  if (!base64) { showToast('Falha ao gerar o PDF.'); return; }
+
+  diag('pdf: gravando ' + nomeArq + ' (' + Math.round(base64.length * 0.75 / 1024) + ' KB)…');
+
+  _gravarPdfEm(FS, _PDF_DIRS, 0, nomeArq, base64).then(function(r) {
+    diag('pdf: gravado em ' + r.dir + ' → ' + r.uri);
+    var onde = _PDF_DIR_LABEL[r.dir] || 'no aparelho';
+    showConfirm('PDF salvo ' + onde + '. Abrir ' + label + ' agora?',
+      function() { abrirPdfNativo(r.uri, nomeArq, label); },
+      function() { showToast('PDF salvo: ' + nomeArq); });
+  }).catch(function(e) {
+    diag('pdf: NÃO foi possível gravar →', e);
+    showToast('Não foi possível salvar o PDF no aparelho.');
+  });
+}
+
+function abrirPdfNativo(uri, nomeArq, label) {
+  var FO = pluginFileOpener();
+  var compartilhar = function(motivo) {
+    var SH = pluginShare();
+    diag('pdf: abrindo via Share (' + motivo + ')');
+    if (!SH) { showToast('PDF salvo: ' + nomeArq + '. Abra pelo gerenciador de arquivos.'); return; }
+    SH.share({ title: nomeArq, url: uri, dialogTitle: 'Abrir ou enviar ' + label })
+      .catch(function(e) {
+        diag('pdf: Share falhou →', e);
+        showToast('PDF salvo: ' + nomeArq + '. Abra pelo gerenciador de arquivos.');
+      });
+  };
+  if (!FO || typeof FO.open !== 'function') { compartilhar('FileOpener ausente'); return; }
+  FO.open({ filePath: uri, contentType: 'application/pdf', openWithDefault: false })
+    .then(function() { diag('pdf: aberto pelo FileOpener'); })
+    .catch(function(e) {
+      /* sem leitor de PDF instalado, ou o Intent foi recusado */
+      diag('pdf: FileOpener falhou →', e);
+      compartilhar('FileOpener recusou');
+    });
 }
 
 /* Recibo em PDF do pagamento pago (F6.5) */
@@ -1486,7 +1591,13 @@ function renderMateriais() {
   }).join('');
 }
 
+/* Pra onde o formulário de material volta depois de salvar/excluir.
+   Vindo do picker (dentro de um orçamento em edição) voltar pra tela de
+   materiais tiraria o usuário do fluxo do orçamento. */
+var _matReturn = 'screen-materiais';
+
 function novoMaterial() {
+  _matReturn = 'screen-materiais';
   _matEditId = null;
   var ex = document.getElementById('mat-excluir-btn');
   if (ex) ex.style.display = 'none';
@@ -1503,6 +1614,7 @@ function novoMaterial() {
 function editarMaterial(id) {
   var m = materialById(id);
   if (!m) return;
+  _matReturn = 'screen-materiais';
   _matEditId = id;
   var ex = document.getElementById('mat-excluir-btn');
   if (ex) ex.style.display = 'block';
@@ -1529,7 +1641,7 @@ function excluirMaterial() {
     _matEditId = null;
     persistDelete('materiais', id, function() {
       showToast('Material excluído.');
-      goTo('screen-materiais');
+      goTo(_matReturn);
     });
   });
 }
@@ -1572,7 +1684,7 @@ function salvarMaterial() {
     document.getElementById('mat-unid-input').value = 'unidade';
     document.querySelectorAll('#mat-cat-row .filter-chip').forEach(function(c) { c.classList.remove('active'); });
     document.querySelector('#mat-cat-row .filter-chip').classList.add('active');
-    goTo('screen-materiais');
+    goTo(_matReturn);
   });
 }
 
@@ -2092,6 +2204,11 @@ function salvarCliente() {
 
 var orcamentoAtual = { materiais: [], maoDeObra: [] };
 var _orcEditId = null;
+/* status do orçamento que está sendo editado (null = orçamento novo).
+   Editar um já ENVIADO não pode rebaixá-lo pra rascunho nem apagar o
+   histórico: o cliente já recebeu uma versão, então a alteração vira
+   revisão numerada e carimbada no PDF. */
+var _orcEditStatus = null;
 
 function orcamentoById(id) {
   for (var i = 0; i < orcamentos.length; i++) if (orcamentos[i].id === id) return orcamentos[i];
@@ -2105,6 +2222,15 @@ function totalOrcamento(o) {
   return round2(tm + tb);
 }
 
+/* "Revisão 2 · 19/08/2026" — vazio enquanto o orçamento nunca foi
+   editado depois de enviado. */
+function revisaoOrcamento(o) {
+  if (!o || !o.rev) return '';
+  var txt = 'Revisão ' + o.rev;
+  if (o.editadoEm) txt += ' · ' + o.editadoEm.split('-').reverse().join('/');
+  return txt;
+}
+
 function resumoOrcamento(o) {
   if (o.maoDeObra.length > 0) return o.maoDeObra[0].nome;
   var n = o.materiais.length;
@@ -2114,6 +2240,7 @@ function resumoOrcamento(o) {
 function novoOrcamento() {
   orcamentoAtual = { materiais: [], maoDeObra: [] };
   _orcEditId = null;
+  _orcEditStatus = null;
   document.getElementById('orc-form-title').textContent = 'Novo Orçamento';
   setPickerCliente('orc', '');
   document.getElementById('orc-erro').style.display = 'none';
@@ -2156,6 +2283,14 @@ function renderOrcamento() {
       }).join('');
     }
   }
+
+  /* Revisando um enviado: "RASCUNHO" não faz sentido (salvar não rebaixa
+     o status) e só confundiria — some, e o botão principal diz o que faz. */
+  var revisando = _orcEditStatus && _orcEditStatus !== 'rascunho';
+  var btnRasc = document.getElementById('orc-btn-rascunho');
+  if (btnRasc) btnRasc.style.display = revisando ? 'none' : '';
+  var btnPdf = document.getElementById('orc-btn-pdf');
+  if (btnPdf) btnPdf.textContent = revisando ? 'SALVAR REVISÃO' : 'SALVAR PDF';
 
   var totalMat = orcamentoAtual.materiais.reduce(function(s, m) { return s + m.preco * m.qty; }, 0);
   var totalMob = orcamentoAtual.maoDeObra.reduce(function(s, m) { return s + m.valor; }, 0);
@@ -2303,21 +2438,73 @@ function escolherClientePicker(id) {
   goTo(_pickerAlvos[_pickerAlvo].volta);
 }
 
+/* ── PICKER DE MATERIAL ──
+   Mesma busca sem acento do picker de cliente: o catálogo cresce e rolar
+   até "Disjuntor 25A" no meio de dezenas de itens não escala. */
+
+function abrirPickerMaterial() {
+  var busca = document.getElementById('picker-mat-busca');
+  if (busca) busca.value = '';
+  goTo('screen-picker-material');
+}
+
+/* Cadastrar material sem perder o orçamento em edição: o formulário volta
+   pro picker, e não pra tela de materiais, porque foi de lá que veio. */
+function novoMaterialDoPicker() {
+  novoMaterial();
+  _matReturn = 'screen-picker-material';
+}
+
 function renderPickerMaterial() {
   var list = document.getElementById('picker-mat-list');
   if (!list) return;
-  if (materiais.length === 0) {
-    list.innerHTML = '<div class="empty-state">Nenhum material cadastrado.</div>';
+
+  var busca = _semAcento((document.getElementById('picker-mat-busca') || {}).value);
+
+  /* A busca também pega a categoria ("tomadas" acha o interruptor), mas
+     quem bate pelo NOME vem primeiro: digitar "fio" tem que mostrar os
+     fios antes do eletroduto, que só entrou por ser da categoria FIOS. */
+  var items = materiais.filter(function(m) {
+    return !busca || _semAcento(m.nome + ' ' + (m.cat || '')).indexOf(busca) !== -1;
+  }).sort(function(a, b) {
+    if (busca) {
+      var pa = _semAcento(a.nome).indexOf(busca) !== -1 ? 0 : 1;
+      var pb = _semAcento(b.nome).indexOf(busca) !== -1 ? 0 : 1;
+      if (pa !== pb) return pa - pb;
+    }
+    return a.nome.localeCompare(b.nome, 'pt-BR');
+  });
+
+  var count = document.getElementById('picker-mat-count');
+  if (count) {
+    count.textContent = materiais.length === 0
+      ? 'NENHUM MATERIAL CADASTRADO'
+      : items.length + (items.length === 1 ? ' MATERIAL' : ' MATERIAIS');
+  }
+
+  if (items.length === 0) {
+    list.innerHTML = '<div class="empty-state">'
+      + (materiais.length === 0 ? 'Nenhum material cadastrado.' : 'Nenhum material encontrado.')
+      + '</div>';
     return;
   }
-  list.innerHTML = materiais.map(function(m) {
+
+  /* já no orçamento? mostra a qtd atual — evita adicionar duplicado sem perceber */
+  var jaNoOrc = {};
+  orcamentoAtual.materiais.forEach(function(x) { jaNoOrc[x.materialId] = x.qty; });
+
+  list.innerHTML = items.map(function(m) {
     var unit = m.unit === 'metro' ? 'metro' : 'un.';
     var preco = 'R$ ' + m.preco.toFixed(2).replace('.', ',');
-    return '<div class="mat-row" style="align-items:center;">'
-      + '<div><div class="mat-nome">' + esc(m.nome) + '</div><div class="mat-unit">' + preco + ' / ' + unit + '</div></div>'
+    var noOrc = jaNoOrc[m.id];
+    return '<div class="mat-row" style="align-items:center;cursor:default;">'
+      + '<div><div class="mat-nome">' + esc(m.nome) + '</div><div class="mat-unit">' + preco + ' / ' + unit
+      + (m.cat ? ' · ' + esc(m.cat) : '')
+      + (noOrc ? ' · <span style="color:#15803d;">' + noOrc + ' no orçamento</span>' : '')
+      + '</div></div>'
       + '<div style="display:flex;align-items:center;gap:6px;">'
-      + '<input id="pqty-' + m.id + '" type="number" min="1" max="99999" value="1" aria-label="Quantidade" style="width:50px;padding:4px 6px;border:1.5px solid #d0d0d0;border-radius:6px;font-size:13px;text-align:center;">'
-      + '<button onclick="adicionarMatOrc(\'' + m.id + '\')" style="background:#1e3a5f;color:#fff;border:none;border-radius:6px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;">ADD</button>'
+      + '<input id="pqty-' + m.id + '" type="number" min="1" max="99999" value="1" aria-label="Quantidade de ' + esc(m.nome) + '" style="width:50px;padding:4px 6px;border:1.5px solid #d0d0d0;border-radius:6px;font-size:13px;text-align:center;">'
+      + '<button onclick="adicionarMatOrc(\'' + m.id + '\')" aria-label="Adicionar ' + esc(m.nome) + ' ao orçamento" style="background:#1e3a5f;color:#fff;border:none;border-radius:6px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;">ADD</button>'
       + '</div></div>';
   }).join('');
 }
@@ -2456,9 +2643,25 @@ function gerarPdfOrcamento(o) {
   doc.setTextColor(cinza[0], cinza[1], cinza[2]);
   doc.text('Data: ' + dataFmt + '    Status: ' + (_orcStatusBadge[o.status] || o.status.toUpperCase()), M, 51);
 
+  /* Carimbo de revisão: o cliente já recebeu uma versão anterior deste
+     orçamento, então o PDF precisa dizer que os números mudaram — senão
+     duas folhas com a mesma data e totais diferentes viram discussão. */
+  var yTitulo = 60;
+  var rev = revisaoOrcamento(o);
+  if (rev) {
+    doc.setFillColor(253, 243, 222);
+    doc.setDrawColor(amber[0], amber[1], amber[2]);
+    doc.rect(M, 54, W - 2 * M, 8, 'FD');
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
+    doc.setTextColor(amber[0], amber[1], amber[2]);
+    doc.text('ORÇAMENTO REVISADO — ' + rev.toUpperCase()
+      + ' · SUBSTITUI AS VERSÕES ANTERIORES', M + 3, 59.5);
+    yTitulo = 70;
+  }
+
   /* cliente */
   var c = clienteById(o.clienteId);
-  y = 60;
+  y = yTitulo;
   doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
   doc.setTextColor(cinza[0], cinza[1], cinza[2]);
   doc.text('CLIENTE', M, y);
@@ -2553,12 +2756,13 @@ function gerarPdfOrcamento(o) {
   /* rodapé */
   doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
   doc.setTextColor(150, 150, 150);
-  doc.text('Gerado pelo Electric Budget em ' + hojeLocal().split('-').reverse().join('/'), M, 290);
+  doc.text('Gerado pelo Electric Budget em ' + hojeLocal().split('-').reverse().join('/')
+    + (o.rev ? '  ·  Revisão ' + o.rev : ''), M, 290);
 
   var nomeArq = 'orcamento-' + (c ? c.nome : 'cliente')
     .toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
-    + '-' + o.data + '.pdf';
+    + '-' + o.data + (o.rev ? '-rev' + o.rev : '') + '.pdf';
   entregarPdf(doc, nomeArq, 'o orçamento');
   return true;
 }
@@ -2566,6 +2770,9 @@ function gerarPdfOrcamento(o) {
 function salvarRascunho() { saveOrcamento('rascunho', false); }
 function salvarOrcamentoPDF() { saveOrcamento('enviado', true); }
 
+/* `status` é só a INTENÇÃO do botão. Um orçamento que já saiu de rascunho
+   mantém o status que tem — salvar de novo é revisar, não reenviar nem
+   rebaixar (o cliente já viu a versão anterior). */
 function saveOrcamento(status, gerarPdf) {
   var erro = document.getElementById('orc-erro');
   var clienteId = pickerClienteId('orc');
@@ -2581,23 +2788,33 @@ function saveOrcamento(status, gerarPdf) {
   }
   erro.style.display = 'none';
 
+  var existente = _orcEditId ? orcamentoById(_orcEditId) : null;
+  var jaSaiuDeRascunho = !!(existente && existente.status !== 'rascunho');
+
   var orc = {
     id: _orcEditId || novoId(),
     clienteId: clienteId,
-    data: hojeLocal(),
-    status: status,
+    /* data de emissão nunca muda: é a referência que o cliente tem */
+    data: existente ? existente.data : hojeLocal(),
+    status: jaSaiuDeRascunho ? existente.status : status,
     materiais: orcamentoAtual.materiais,
     maoDeObra: orcamentoAtual.maoDeObra,
+    rev: (existente && existente.rev) || 0,
+    editadoEm: (existente && existente.editadoEm) || null,
     total: 0
   };
-  var existente = orcamentoById(orc.id);
-  if (existente) { orc.data = existente.data; }
+  /* revisão só conta depois de enviado — mexer num rascunho é rascunhar */
+  if (jaSaiuDeRascunho) {
+    orc.rev = orc.rev + 1;
+    orc.editadoEm = hojeLocal();
+  }
   orc.total = totalOrcamento(orc);
 
   var idx = -1;
   for (var i = 0; i < orcamentos.length; i++) if (orcamentos[i].id === orc.id) idx = i;
   if (idx >= 0) orcamentos[idx] = orc; else orcamentos.push(orc);
   _orcEditId = null;
+  _orcEditStatus = null;
 
   persistPut('orcamentos', orc, function() {
     var pdfOk = false;
@@ -2605,7 +2822,10 @@ function saveOrcamento(status, gerarPdf) {
       try { pdfOk = gerarPdfOrcamento(orc); }
       catch (e) { console.error('pdf', e); showToast('Erro ao gerar o PDF.'); }
     }
-    showToast(status === 'rascunho' ? 'Rascunho salvo!' : (pdfOk ? 'Orçamento salvo — PDF gerado!' : 'Orçamento salvo!'));
+    showToast(orc.rev > 0
+      ? (pdfOk ? 'Revisão ' + orc.rev + ' salva — PDF gerado!' : 'Revisão ' + orc.rev + ' salva!')
+      : (orc.status === 'rascunho' ? 'Rascunho salvo!'
+        : (pdfOk ? 'Orçamento salvo — PDF gerado!' : 'Orçamento salvo!')));
     orcamentoAtual = { materiais: [], maoDeObra: [] };
     setPickerCliente('orc', '');
     goTo('screen-home');
@@ -2649,7 +2869,8 @@ function renderListaOrcamentos() {
     return '<div class="orc-hist-row" onclick="abrirOrcDetalhe(\'' + o.id + '\')">'
       + '<div class="orc-hist-left">'
       + '<div class="orc-hist-nome">' + esc(clienteNome(o.clienteId)) + '</div>'
-      + '<div class="orc-hist-data">' + esc(resumoOrcamento(o)) + ' · ' + dataFmt + '</div>'
+      + '<div class="orc-hist-data">' + esc(resumoOrcamento(o)) + ' · ' + dataFmt
+      + (o.rev ? ' · rev ' + o.rev : '') + '</div>'
       + '</div>'
       + '<div class="orc-hist-right">'
       + '<span class="orc-hist-val">' + fmtBR(o.total) + '</span>'
@@ -2689,6 +2910,13 @@ function renderOrcDetalhe() {
 
   document.getElementById('od-cliente').textContent = clienteNome(o.clienteId);
   document.getElementById('od-data').textContent = parts[2] + '/' + parts[1] + '/' + parts[0];
+
+  var rev = document.getElementById('od-rev');
+  if (rev) {
+    var txt = revisaoOrcamento(o);
+    rev.textContent = txt;
+    rev.style.display = txt ? 'block' : 'none';
+  }
   var badge = document.getElementById('od-badge');
   badge.className = 'status-badge ' + o.status;
   badge.textContent = _orcStatusBadge[o.status] || o.status.toUpperCase();
@@ -2729,7 +2957,8 @@ function renderOrcDetalhe() {
     btns.innerHTML = '<button class="dual-btn" onclick="editarOrcamento()">EDITAR</button>'
       + '<button class="dual-btn primary" onclick="enviarOrcamento()">ENVIAR</button>';
   } else if (o.status === 'enviado') {
-    btns.innerHTML = '<button class="dual-btn" style="color:#ef4444;border-color:#ef4444;" onclick="recusarOrcamento()">RECUSAR</button>'
+    btns.innerHTML = '<button class="dual-btn" onclick="editarOrcamento()">EDITAR</button>'
+      + '<button class="dual-btn" style="color:#ef4444;border-color:#ef4444;" onclick="recusarOrcamento()">RECUSAR</button>'
       + '<button class="dual-btn primary" onclick="aprovarOrcamento()">APROVAR</button>';
   } else if (o.status === 'aprovado') {
     btns.innerHTML = '<button class="dual-btn primary" style="flex:1;" onclick="pdfDoDetalhe()">GERAR PDF</button>';
@@ -2806,17 +3035,31 @@ function pdfDoDetalhe() {
   }
 }
 
+/* Rascunho e ENVIADO são editáveis. Aprovado não: já gerou Pagamento
+   (SPEC §8.1) e mexer no total deixaria a cobrança divergindo do
+   orçamento; recusado é somente leitura. */
 function editarOrcamento() {
   var o = orcamentoById(_orcDetalheId);
-  if (!o || o.status !== 'rascunho') return;
-  _orcEditId = o.id;
-  orcamentoAtual = {
-    materiais: o.materiais.map(function(m) { return Object.assign({}, m); }),
-    maoDeObra: o.maoDeObra.map(function(m) { return Object.assign({}, m); })
+  if (!o || (o.status !== 'rascunho' && o.status !== 'enviado')) return;
+  var abrir = function() {
+    _orcEditId = o.id;
+    _orcEditStatus = o.status;
+    orcamentoAtual = {
+      materiais: o.materiais.map(function(m) { return Object.assign({}, m); }),
+      maoDeObra: o.maoDeObra.map(function(m) { return Object.assign({}, m); })
+    };
+    document.getElementById('orc-form-title').textContent =
+      o.status === 'enviado' ? 'Revisar Orçamento' : 'Editar Orçamento';
+    document.getElementById('orc-erro').style.display = 'none';
+    setPickerCliente('orc', o.clienteId);
+    goTo('screen-orcamento');
   };
-  document.getElementById('orc-form-title').textContent = 'Editar Orçamento';
-  setPickerCliente('orc', o.clienteId);
-  goTo('screen-orcamento');
+  if (o.status === 'enviado') {
+    showConfirm('Este orçamento já foi enviado ao cliente. Editar cria a revisão '
+      + ((o.rev || 0) + 1) + ', que ficará marcada no PDF. Continuar?', abrir);
+    return;
+  }
+  abrir();
 }
 
 function enviarOrcamento() {
