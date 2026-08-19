@@ -92,6 +92,143 @@ function showToast(msg) {
   _toastTimer = setTimeout(function() { t.classList.remove('show'); }, 2500);
 }
 
+/* ================================================================
+   DIAGNÓSTICO — log persistente visível dentro do app
+
+   O app roda no WebView do Android, onde não existe console acessível
+   sem cabo USB + Chrome DevTools. Tudo que depende de plugin nativo
+   (hoje: sincronização de contatos) falha em silêncio para o usuário.
+   Este log grava cada passo dessas operações e a tela
+   Meu Perfil › Diagnóstico permite ler, copiar e exportar depois.
+
+   localStorage, e não IndexedDB, de propósito: é síncrono, então a
+   entrada já está gravada mesmo que a operação seguinte trave ou
+   derrube o WebView — que é justamente o caso que se quer diagnosticar.
+   ================================================================ */
+
+var DIAG_KEY = 'eb-diag-log';
+var DIAG_MAX = 400;      /* entradas mantidas (as mais recentes) */
+var DIAG_MAX_LEN = 700;  /* corte por entrada — protege a cota do localStorage */
+var _diag = [];
+
+(function carregarDiag() {
+  try {
+    var raw = localStorage.getItem(DIAG_KEY);
+    _diag = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(_diag)) _diag = [];
+  } catch (e) { _diag = []; }
+})();
+
+function diagGravar() {
+  try { localStorage.setItem(DIAG_KEY, JSON.stringify(_diag)); }
+  catch (e) { /* cota cheia ou aba privada: o log em memória segue valendo */ }
+}
+
+/* Serializa qualquer coisa sem quebrar em referência cíclica ou em
+   objeto exótico devolvido por um plugin nativo. */
+function diagValor(v) {
+  if (v === undefined) return '';
+  if (v === null) return 'null';
+  if (typeof v === 'string') return v;
+  if (v instanceof Error) return (v.name || 'Error') + ': ' + (v.message || '?');
+  try { return JSON.stringify(v); } catch (e) { return String(v); }
+}
+
+function diag(msg, extra) {
+  var linha = String(msg);
+  if (arguments.length > 1) linha += ' ' + diagValor(extra);
+  if (linha.length > DIAG_MAX_LEN) linha = linha.slice(0, DIAG_MAX_LEN) + '…';
+
+  _diag.push({ t: new Date().toISOString(), m: linha });
+  if (_diag.length > DIAG_MAX) _diag.splice(0, _diag.length - DIAG_MAX);
+  diagGravar();
+  console.log('[diag]', linha);
+  if (activeScreenId() === 'screen-diagnostico') renderDiagnostico();
+}
+
+/* Quais plugins o Capacitor realmente registrou neste boot. Um plugin
+   que não aparece aqui não foi instalado/sincronizado no projeto Android. */
+function diagPlugins() {
+  var P = window.Capacitor && window.Capacitor.Plugins;
+  if (!P) return '(Capacitor ausente — rodando como PWA)';
+  try { return Object.keys(P).join(', ') || '(nenhum)'; }
+  catch (e) { return '(ilegível)'; }
+}
+
+function diagTexto() {
+  var cab = [
+    'Electric Budget — diagnóstico',
+    'gerado em:  ' + new Date().toISOString(),
+    'plataforma: ' + (capNativo() ? 'app nativo (Capacitor)' : 'navegador/PWA'),
+    'plugins:    ' + diagPlugins(),
+    'userAgent:  ' + navigator.userAgent,
+    '─────────────────────────────────────────'
+  ].join('\n');
+
+  if (!_diag.length) return cab + '\n(nenhum evento registrado ainda)';
+  return cab + '\n' + _diag.map(function(e) {
+    return e.t.slice(11, 19) + '  ' + e.m;   /* só HH:MM:SS, a data está no cabeçalho */
+  }).join('\n');
+}
+
+function renderDiagnostico() {
+  var el = document.getElementById('diag-conteudo');
+  if (el) el.textContent = diagTexto();
+  var c = document.getElementById('diag-count');
+  if (c) c.textContent = _diag.length + ' EVENTO(S) REGISTRADO(S)';
+}
+
+function copiarDiagnostico() {
+  var falhou = function() { showToast('Não foi possível copiar. Use EXPORTAR.'); };
+  if (!navigator.clipboard || !navigator.clipboard.writeText) { falhou(); return; }
+  navigator.clipboard.writeText(diagTexto())
+    .then(function() { showToast('Diagnóstico copiado.'); })
+    .catch(falhou);
+}
+
+function exportarDiagnostico() {
+  try {
+    var blob = new Blob([diagTexto()], { type: 'text/plain' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'electric-budget-diagnostico-' + hojeLocal() + '.txt';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
+    showToast('Arquivo de diagnóstico gerado.');
+  } catch (e) {
+    console.error('exportarDiagnostico', e);
+    showToast('Não foi possível gerar o arquivo.');
+  }
+}
+
+function limparDiagnostico() {
+  showConfirm('Apagar todo o log de diagnóstico?', function() {
+    _diag = [];
+    diagGravar();
+    renderDiagnostico();
+    showToast('Log limpo.');
+  });
+}
+
+/* Botão da tela: roda o sync na hora e deixa o log aparecendo ao vivo. */
+function diagRodarSync() {
+  diag('── sync disparado manualmente pela tela de diagnóstico ──');
+  sincronizarContatos(true).then(renderDiagnostico);
+}
+
+/* Erros que ninguém tratou também entram no log — inclusive os que
+   acontecem no boot, antes de qualquer tela estar aberta. */
+window.addEventListener('error', function(e) {
+  diag('ERRO JS: ' + (e.message || '?') + ' @ '
+     + String(e.filename || '?').split('/').pop() + ':' + (e.lineno || 0));
+});
+window.addEventListener('unhandledrejection', function(e) {
+  diag('PROMISE REJEITADA:', e.reason instanceof Error ? e.reason : diagValor(e.reason));
+});
+
 /* ── CONFIRM ── */
 var _confirmCb = null;
 var _confirmCancelCb = null;
@@ -1633,33 +1770,99 @@ function ajustarBotaoContatos() {
   if (fab) fab.innerHTML = capNativo() ? 'Novo no<br/>Celular' : 'Adicionar<br/>Cliente';
 }
 
+/* Motivos pelos quais a leitura da agenda pode não acontecer. A leitura
+   resolve com um array (sucesso) ou com { falha: <chave daqui> } — cada
+   causa tem uma mensagem própria, porque "permissão negada" para tudo
+   escondia falhas que não eram de permissão nenhuma. */
+var MSG_FALHA_CONTATOS = {
+  'nao-nativo':     'Sincronização disponível apenas no app Android.',
+  'plugin-ausente': 'O plugin de contatos não carregou. Veja Meu Perfil › Diagnóstico.',
+  'sem-permissao':  'Permissão de contatos negada. Autorize em Ajustes › Apps › Electric Budget › Permissões.',
+  'erro-leitura':   'Não foi possível ler os contatos do celular. Veja Meu Perfil › Diagnóstico.'
+};
+
+/* Amostra estrutural de um contato cru, para o log. Só chaves, contagens
+   e nome mascarado — o objetivo é flagrar projection/shape errados, não
+   despejar a agenda do usuário dentro de um arquivo de texto. */
+function diagAmostraContato(c) {
+  if (!c) return '(vazio)';
+  var nome = (c.name && (c.name.display || [c.name.given, c.name.family].filter(Boolean).join(' '))) || '';
+  return {
+    chaves: Object.keys(c),
+    temContactId: !!c.contactId,
+    chavesName: c.name ? Object.keys(c.name) : null,
+    nomeResolvido: nome ? nome.slice(0, 2) + '***' : '(VAZIO)',
+    qtdPhones: (c.phones || []).length,
+    chavesPhone0: (c.phones && c.phones[0]) ? Object.keys(c.phones[0]) : null,
+    phone0TemNumber: !!(c.phones && c.phones[0] && c.phones[0].number),
+    qtdEnderecos: (c.postalAddresses || []).length
+  };
+}
+
 /* Lê a agenda e normaliza para o shape de cliente. */
 function lerContatosDoAparelho() {
   var C = pluginContacts();
-  if (!capNativo() || !C) return Promise.resolve(null);
+  diag('contatos: leitura iniciada · nativo=' + capNativo()
+     + ' · plugin Contacts=' + (C ? 'presente' : 'AUSENTE'));
+
+  if (!capNativo()) {
+    diag('contatos: abortado — não está rodando como app nativo');
+    return Promise.resolve({ falha: 'nao-nativo' });
+  }
+  if (!C) {
+    diag('contatos: abortado — Capacitor.Plugins.Contacts não existe. Registrados: ' + diagPlugins());
+    return Promise.resolve({ falha: 'plugin-ausente' });
+  }
+  if (typeof C.getContacts !== 'function' || typeof C.checkPermissions !== 'function') {
+    diag('contatos: abortado — plugin sem os métodos esperados. Métodos: ' + Object.keys(C).join(', '));
+    return Promise.resolve({ falha: 'plugin-ausente' });
+  }
 
   return C.checkPermissions()
     .then(function(p) {
+      diag('contatos: checkPermissions →', p);
       if (p && p.contacts === 'granted') return p;
-      return C.requestPermissions();
+      diag('contatos: solicitando permissão ao usuário…');
+      return C.requestPermissions().then(function(r) {
+        diag('contatos: requestPermissions →', r);
+        return r;
+      });
     })
     .then(function(p) {
-      if (!p || p.contacts !== 'granted') return null;
-      return C.getContacts({ projection: { name: true, phones: true, postalAddresses: true } });
-    })
-    .then(function(res) {
-      if (!res) return null;
-      return (res.contacts || []).map(function(c) {
-        var pa = (c.postalAddresses && c.postalAddresses[0]) || {};
-        var nome = (c.name && (c.name.display || [c.name.given, c.name.family].filter(Boolean).join(' '))) || '';
-        return {
-          contatoId: String(c.contactId),
-          nome: nome.trim(),
-          telefone: (c.phones && c.phones[0] && c.phones[0].number) || '',
-          endereco: pa.street || '',
-          cidade: pa.city || ''
-        };
-      }).filter(function(c) { return c.nome && c.telefone; });
+      if (!p || p.contacts !== 'granted') {
+        diag('contatos: permissão NÃO concedida (estado=' + (p ? p.contacts : 'sem resposta') + ')');
+        return { falha: 'sem-permissao' };
+      }
+
+      diag('contatos: chamando getContacts…');
+      return C.getContacts({ projection: { name: true, phones: true, postalAddresses: true } })
+        .then(function(res) {
+          var brutos = (res && res.contacts) || [];
+          diag('contatos: getContacts devolveu ' + brutos.length + ' registro(s) bruto(s)'
+             + (res ? '' : ' — resposta vazia/undefined'));
+          if (brutos.length) diag('contatos: shape do 1º registro →', diagAmostraContato(brutos[0]));
+
+          var semNome = 0, semTelefone = 0;
+          var lista = brutos.map(function(c) {
+            var pa = (c.postalAddresses && c.postalAddresses[0]) || {};
+            var nome = (c.name && (c.name.display || [c.name.given, c.name.family].filter(Boolean).join(' '))) || '';
+            return {
+              contatoId: String(c.contactId),
+              nome: nome.trim(),
+              telefone: (c.phones && c.phones[0] && c.phones[0].number) || '',
+              endereco: pa.street || '',
+              cidade: pa.city || ''
+            };
+          }).filter(function(c) {
+            if (!c.nome) { semNome++; return false; }
+            if (!c.telefone) { semTelefone++; return false; }
+            return true;
+          });
+
+          diag('contatos: ' + lista.length + ' utilizável(is) · descartados '
+             + semNome + ' sem nome e ' + semTelefone + ' sem telefone');
+          return lista;
+        });
     });
 }
 
@@ -1669,18 +1872,31 @@ function lerContatosDoAparelho() {
 var _syncEmAndamento = false;
 
 function sincronizarContatos(interativo) {
-  if (_syncEmAndamento) return Promise.resolve();
+  if (_syncEmAndamento) {
+    diag('sync: ignorado — outra sincronização ainda em andamento');
+    return Promise.resolve();
+  }
   _syncEmAndamento = true;
+  diag('── sync iniciado (' + (interativo ? 'manual' : 'boot') + ') ──');
 
-  return lerContatosDoAparelho().then(function(doAparelho) {
-    if (!doAparelho) {
-      if (interativo) showToast('Permissão de contatos negada. Autorize nas configurações do app.');
+  /* Promise.resolve().then(...) e não a chamada direta: se a leitura
+     estourar de forma síncrona (plugin meio carregado, método ausente),
+     a exceção escapava daqui com _syncEmAndamento travado em true — e
+     todo sync posterior virava no-op silencioso até reiniciar o app. */
+  return Promise.resolve().then(lerContatosDoAparelho).then(function(doAparelho) {
+    if (!Array.isArray(doAparelho)) {
+      var motivo = (doAparelho && doAparelho.falha) || 'erro-leitura';
+      diag('sync: encerrado sem ler a agenda — motivo=' + motivo);
+      if (interativo) showToast(MSG_FALHA_CONTATOS[motivo] || MSG_FALHA_CONTATOS['erro-leitura']);
       return;
     }
 
     var porContatoId = {};
     clientes.forEach(function(c) { if (c.contatoId) porContatoId[c.contatoId] = c; });
+    diag('sync: agenda=' + doAparelho.length + ' · clientes no app=' + clientes.length
+       + ' (já espelhados=' + Object.keys(porContatoId).length + ')');
 
+    var novos = 0, adotados = 0, atualizados = 0;
     var aGravar = [];
     doAparelho.forEach(function(ct) {
       var existente = porContatoId[ct.contatoId];
@@ -1699,6 +1915,7 @@ function sincronizarContatos(interativo) {
           if (ct.endereco) orfao.endereco = ct.endereco;
           if (ct.cidade) orfao.cidade = ct.cidade;
           aGravar.push(orfao);
+          adotados++;
         } else {
           var novo = {
             id: novoId(), contatoId: ct.contatoId,
@@ -1707,6 +1924,7 @@ function sincronizarContatos(interativo) {
           };
           clientes.push(novo);
           aGravar.push(novo);
+          novos++;
         }
         return;
       }
@@ -1722,9 +1940,14 @@ function sincronizarContatos(interativo) {
       if (ct.endereco) existente.endereco = ct.endereco;
       if (ct.cidade) existente.cidade = ct.cidade;
       aGravar.push(existente);
+      atualizados++;
     });
 
+    diag('sync: ' + novos + ' novo(s) · ' + adotados + ' adotado(s) · '
+       + atualizados + ' atualizado(s) → ' + aGravar.length + ' a gravar');
+
     if (aGravar.length === 0) {
+      diag('sync: nada mudou — concluído');
       if (interativo) showToast('Contatos já estavam em dia.');
       return;
     }
@@ -1735,16 +1958,25 @@ function sincronizarContatos(interativo) {
       if (interativo) showToast(aGravar.length + ' contato(s) sincronizado(s).');
     };
 
-    if (!_dbOk) { aplicar(); return; }
+    if (!_dbOk) {
+      diag('sync: IndexedDB indisponível — mudanças só em memória, perdidas ao fechar o app');
+      aplicar();
+      return;
+    }
     return dbPutMany(aGravar.map(function(c) { return { store: 'clientes', obj: c }; }))
-      .then(aplicar)
+      .then(function() {
+        diag('sync: ' + aGravar.length + ' cliente(s) gravado(s) no IndexedDB — concluído');
+        aplicar();
+      })
       .catch(function(e) {
+        diag('sync: FALHA ao gravar no IndexedDB →', e);
         console.error('sincronizarContatos', e);
         if (interativo) showToast(ERRO_SALVAR);
       });
   }).catch(function(e) {
+    diag('sync: EXCEÇÃO não tratada →', e);
     console.error('sincronizarContatos', e);
-    if (interativo) showToast('Não foi possível ler os contatos do celular.');
+    if (interativo) showToast(MSG_FALHA_CONTATOS['erro-leitura']);
   }).then(function() {
     _syncEmAndamento = false;
   });
@@ -1765,10 +1997,17 @@ function novoContatoNoCelular() {
   var fallback = function() {
     showToast('Abra o app de Contatos do celular para adicionar, depois toque em SINCRONIZAR.');
   };
-  if (!AL) { fallback(); return; }
+  if (!AL) {
+    diag('novo contato: AppLauncher ausente. Plugins: ' + diagPlugins());
+    fallback();
+    return;
+  }
   /* INSERT abre direto o formulário de novo contato; se o aparelho não
      tratar essa intent, cai na lista de contatos. */
-  AL.openUrl({ url: 'content://contacts/people/' }).catch(fallback);
+  diag('novo contato: abrindo app de Contatos via AppLauncher…');
+  AL.openUrl({ url: 'content://contacts/people/' })
+    .then(function(r) { diag('novo contato: AppLauncher openUrl →', r); })
+    .catch(function(e) { diag('novo contato: AppLauncher FALHOU →', e); fallback(); });
 }
 
 function novoCliente() {
@@ -2724,6 +2963,7 @@ function goTo(id, semEmpilhar) {
   if (id === 'screen-notificacoes') renderNotificacoes();
   if (id === 'screen-lista-orcamentos') renderListaOrcamentos();
   if (id === 'screen-perfil-eletricista') renderPerfilEletricista();
+  if (id === 'screen-diagnostico') renderDiagnostico();
   if (id === 'screen-relatorio') renderRelatorio();
   if (id === 'screen-orcamento') renderOrcamento();
   if (id === 'screen-picker-material') renderPickerMaterial();
@@ -2992,6 +3232,8 @@ openDB().then(function() {
   verificarRelogio();
   dispararNotificacoesLocais();
   registrarBotaoVoltar();
+  diag('boot: app pronto · nativo=' + capNativo() + ' · IndexedDB=' + (_dbOk ? 'ok' : 'INDISPONÍVEL')
+     + ' · plugins=[' + diagPlugins() + ']');
   sincronizarContatos();
 });
 

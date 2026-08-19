@@ -640,10 +640,39 @@ Use antes de trocar de celular ou se precisar desinstalar o app.
 <button class="sync-btn" onclick="document.getElementById('backup-file').click()"><span aria-hidden="true">⬆</span> RESTAURAR BACKUP</button>
 <input id="backup-file" type="file" accept="application/json,.json" style="display:none;" onchange="importarBackup(this)"/>
 
+<div class="form-section-label" style="margin-bottom:6px;margin-top:20px;">DIAGNÓSTICO</div>
+<div style="border-top:1.5px solid #222;margin-bottom:10px;"></div>
+<div style="font-size:12px;color:#94785A;margin-bottom:10px;line-height:1.5;">
+Registro do que acontece na sincronização com os contatos do celular.
+Abra aqui se algo não estiver funcionando.
+</div>
+<button class="sync-btn" onclick="goTo('screen-diagnostico')"><span aria-hidden="true">🩺</span> VER DIAGNÓSTICO</button>
+
 <div class="form-section-label" style="margin-bottom:6px;margin-top:20px;">SOBRE</div>
 <div style="border-top:1.5px solid #222;margin-bottom:14px;"></div>
 <div class="about-row"><span>Versão</span><span class="about-val">1.0.0</span></div>
 <div class="about-row"><span>Suporte</span><span class="about-val about-link">suporte@electricbudget.app</span></div>
+<div style="height:16px;"></div>
+</div>
+</div>
+<!-- ===== DIAGNÓSTICO =====
+     Log dos passos das operações nativas (sincronização de contatos).
+     Existe porque no WebView do Android não há console acessível. -->
+<div class="screen" id="screen-diagnostico">
+<div class="topbar">
+<div class="topbar-row">
+<button class="back-btn" onclick="navBack()" aria-label="Voltar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
+<span class="topbar-title">Diagnóstico</span>
+<span style="width:40px;"></span>
+</div>
+</div>
+<div class="scroll-body">
+<div class="sub-label" id="diag-count">0 EVENTO(S) REGISTRADO(S)</div>
+<button class="sync-btn" onclick="diagRodarSync()"><span aria-hidden="true">🔄</span> RODAR SINCRONIZAÇÃO AGORA</button>
+<pre class="diag-log" id="diag-conteudo" aria-live="polite"></pre>
+<button class="sync-btn" onclick="copiarDiagnostico()"><span aria-hidden="true">📋</span> COPIAR</button>
+<button class="sync-btn" onclick="exportarDiagnostico()"><span aria-hidden="true">⬇</span> EXPORTAR .TXT</button>
+<button class="sync-btn" onclick="limparDiagnostico()"><span aria-hidden="true">🗑</span> LIMPAR LOG</button>
 <div style="height:16px;"></div>
 </div>
 </div>

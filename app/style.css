@@ -200,6 +200,17 @@
   }
   .sync-btn:hover { filter: brightness(0.97); }
 
+  /* LOG DE DIAGNÓSTICO — monoespaçado, quebra linha longa, rola sozinho */
+  .diag-log {
+    background: #12202f; color: #d7e3f0;
+    border-radius: 10px; padding: 10px 12px; margin: 0 0 12px;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 10.5px; line-height: 1.5;
+    white-space: pre-wrap; word-break: break-word;
+    max-height: 46vh; overflow-y: auto;
+    user-select: text; -webkit-user-select: text;
+  }
+
   /* SCROLL INDICATOR */
   .scroll-indicator { text-align: center; padding: 4px 0 0; color: #ccc; font-size: 14px; }
 
