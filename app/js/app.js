@@ -452,8 +452,10 @@ function fillClienteSelects() {
   var porNome = '<option disabled selected value="">Selecionar cliente...</option>'
     + ordenados.map(function(c) { return '<option value="' + esc(c.nome) + '">' + esc(c.nome) + '</option>'; }).join('');
   var s1 = document.getElementById('pay-cliente-input'); if (s1) s1.innerHTML = porId;
-  var s2 = document.getElementById('orc-cliente-input'); if (s2) s2.innerHTML = porId;
   var s3 = document.getElementById('ag-cliente-input');  if (s3) s3.innerHTML = porNome;
+  /* o orçamento não usa <select>: escolhe pelo picker com busca
+     (abrirPickerCliente), então aqui só revalida o que está no botão */
+  setOrcCliente(_orcClienteId);
 }
 
 /* ================================================================
@@ -1162,14 +1164,11 @@ function criarOrcamentoDoCompromisso() {
   var a = agendamentoById(_agendamentoId);
   if (!a) return;
   novoOrcamento();
-  var sel = document.getElementById('orc-cliente-input');
-  if (sel) {
-    var achou = false;
-    for (var i = 0; i < clientes.length; i++) {
-      if (clientes[i].nome === a.cliente) { sel.value = clientes[i].id; achou = true; break; }
-    }
-    if (!achou) showToast('Cliente não cadastrado — selecione manualmente.');
+  var achou = false;
+  for (var i = 0; i < clientes.length; i++) {
+    if (clientes[i].nome === a.cliente) { setOrcCliente(clientes[i].id); achou = true; break; }
   }
+  if (!achou) showToast('Cliente não cadastrado — selecione manualmente.');
 }
 
 function toggleConcluidoAgendamento() {
@@ -2078,10 +2077,9 @@ function salvarCliente() {
     renderClientes();
     if (editando) {
       abrirPerfilCliente(cli.id);
-    } else if (_cliReturn === 'screen-orcamento') {
+    } else if (_cliReturn === 'screen-orcamento' || _cliReturn === 'screen-picker-cliente') {
+      setOrcCliente(cli.id);
       goTo('screen-orcamento');
-      var sel = document.getElementById('orc-cliente-input');
-      if (sel) sel.value = cli.id;
     } else {
       goTo('screen-clientes');
     }
@@ -2117,8 +2115,7 @@ function novoOrcamento() {
   orcamentoAtual = { materiais: [], maoDeObra: [] };
   _orcEditId = null;
   document.getElementById('orc-form-title').textContent = 'Novo Orçamento';
-  var sel = document.getElementById('orc-cliente-input');
-  if (sel) sel.selectedIndex = 0;
+  setOrcCliente('');
   document.getElementById('orc-erro').style.display = 'none';
   goTo('screen-orcamento');
 }
@@ -2204,6 +2201,76 @@ function adicionarMobOrc() {
   document.getElementById('mob-valor-input').value = '';
   document.getElementById('orc-mob-form').style.display = 'none';
   renderOrcamento();
+}
+
+/* ── PICKER DE CLIENTE DO ORÇAMENTO ──
+   substitui o <select> nativo: mesma linguagem visual do app (.cliente-row,
+   cores da marca) e busca digitada, pra não precisar rolar até o contato. */
+
+var _orcClienteId = '';
+
+/* busca sem acento e sem caixa */
+function _semAcento(s) {
+  return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+/* fonte única da verdade do cliente do orçamento: guarda o id e redesenha
+   o botão. setOrcCliente('') limpa a seleção. */
+function setOrcCliente(id) {
+  var c = id ? clienteById(id) : null;
+  _orcClienteId = c ? c.id : '';
+  var btn = document.getElementById('orc-cliente-btn');
+  if (!btn) return;
+  btn.classList.toggle('empty', !c);
+  document.getElementById('orc-cliente-avatar').textContent = c ? iniciais(c.nome) : '🔍';
+  document.getElementById('orc-cliente-text').textContent = c ? c.nome : 'Selecionar cliente...';
+}
+
+function abrirPickerCliente() {
+  var busca = document.getElementById('picker-cli-busca');
+  if (busca) busca.value = '';
+  goTo('screen-picker-cliente');
+}
+
+function renderPickerCliente() {
+  var list = document.getElementById('picker-cli-list');
+  if (!list) return;
+  var busca = _semAcento((document.getElementById('picker-cli-busca') || {}).value);
+  var items = clientes.slice().sort(function(a, b) { return a.nome.localeCompare(b.nome, 'pt-BR'); })
+    .filter(function(c) {
+      return !busca || _semAcento(c.nome + ' ' + (c.telefone || '')).indexOf(busca) !== -1;
+    });
+
+  var count = document.getElementById('picker-cli-count');
+  if (count) {
+    count.textContent = clientes.length === 0
+      ? 'NENHUM CLIENTE CADASTRADO'
+      : items.length + (items.length === 1 ? ' CLIENTE' : ' CLIENTES');
+  }
+
+  if (items.length === 0) {
+    list.innerHTML = '<div class="empty-state">'
+      + (clientes.length === 0 ? 'Nenhum cliente cadastrado.' : 'Nenhum cliente encontrado.')
+      + '</div>';
+    return;
+  }
+
+  list.innerHTML = items.map(function(c) {
+    var sel = c.id === _orcClienteId;
+    return '<div class="cliente-row' + (sel ? ' selected' : '') + '" onclick="escolherClienteOrc(\'' + c.id + '\')" role="button" aria-label="Selecionar ' + esc(c.nome) + '">'
+      + '<div class="avatar">' + esc(iniciais(c.nome)) + '</div>'
+      + '<div class="cliente-info">'
+      + '<div class="cnome">' + esc(c.nome) + '</div>'
+      + '<div class="ccel">' + esc(c.telefone || 'sem telefone') + '</div>'
+      + '</div>'
+      + '<div class="cliente-chevron" aria-hidden="true">' + (sel ? '✓' : '›') + '</div>'
+      + '</div>';
+  }).join('');
+}
+
+function escolherClienteOrc(id) {
+  setOrcCliente(id);
+  goTo('screen-orcamento');
 }
 
 function renderPickerMaterial() {
@@ -2471,7 +2538,7 @@ function salvarOrcamentoPDF() { saveOrcamento('enviado', true); }
 
 function saveOrcamento(status, gerarPdf) {
   var erro = document.getElementById('orc-erro');
-  var clienteId = document.getElementById('orc-cliente-input').value;
+  var clienteId = _orcClienteId;
   if (orcamentoAtual.materiais.length === 0 && orcamentoAtual.maoDeObra.length === 0) {
     erro.textContent = 'Adicione itens ao orçamento primeiro.';
     erro.style.display = 'block';
@@ -2510,8 +2577,7 @@ function saveOrcamento(status, gerarPdf) {
     }
     showToast(status === 'rascunho' ? 'Rascunho salvo!' : (pdfOk ? 'Orçamento salvo — PDF gerado!' : 'Orçamento salvo!'));
     orcamentoAtual = { materiais: [], maoDeObra: [] };
-    var sel = document.getElementById('orc-cliente-input');
-    if (sel) sel.selectedIndex = 0;
+    setOrcCliente('');
     goTo('screen-home');
   });
 }
@@ -2719,9 +2785,8 @@ function editarOrcamento() {
     maoDeObra: o.maoDeObra.map(function(m) { return Object.assign({}, m); })
   };
   document.getElementById('orc-form-title').textContent = 'Editar Orçamento';
+  setOrcCliente(o.clienteId);
   goTo('screen-orcamento');
-  var sel = document.getElementById('orc-cliente-input');
-  if (sel) sel.value = o.clienteId;
 }
 
 function enviarOrcamento() {
@@ -2975,6 +3040,7 @@ function goTo(id, semEmpilhar) {
   if (id === 'screen-relatorio') renderRelatorio();
   if (id === 'screen-orcamento') renderOrcamento();
   if (id === 'screen-picker-material') renderPickerMaterial();
+  if (id === 'screen-picker-cliente') renderPickerCliente();
   if (id === 'screen-agenda') { renderCalendar(); renderAgenda(); }
   if (id === 'screen-materiais') renderMateriais();
   if (id === 'screen-clientes') { renderClientes(); ajustarBotaoContatos(); }

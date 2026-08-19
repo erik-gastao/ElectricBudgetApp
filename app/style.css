@@ -252,6 +252,33 @@
   .slider-arrow { font-size: 16px; color: #999; cursor: pointer; user-select: none; }
 
   /* ORCAMENTO */
+  /* seletor de cliente: mesma pilula dos .field-select, mas abre o picker
+     com busca digitada em vez do <select> nativo */
+  .cliente-picker {
+    width: 100%; display: flex; align-items: center; gap: 10px;
+    border: 1.5px solid #e5d4b8; border-radius: 22px; padding: 6px 12px 6px 8px;
+    background: #fff; cursor: pointer; text-align: left; font-family: inherit;
+    transition: border-color .15s, filter .12s;
+  }
+  .cliente-picker:hover { border-color: var(--brand); }
+  .cliente-picker:active { filter: brightness(0.98); }
+  .cliente-picker-avatar {
+    width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700; color: #fff;
+    background: linear-gradient(135deg, var(--ink) 0%, var(--ink-light) 100%);
+  }
+  .cliente-picker.empty .cliente-picker-avatar { background: var(--brand-light); color: var(--brand-dark); font-size: 14px; }
+  .cliente-picker-text {
+    flex: 1; min-width: 0; font-size: 14px; font-weight: 700; color: var(--ink);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .cliente-picker.empty .cliente-picker-text { font-weight: 400; color: #8a7a64; }
+  .cliente-picker-caret { color: var(--brand-dark); font-size: 14px; flex-shrink: 0; }
+
+  /* linha ja escolhida dentro do picker de cliente */
+  .cliente-row.selected { border-color: var(--brand-dark); background: var(--brand-light); }
+
   .cadastro-rapido-btn { width: 100%; border: 1.5px solid #333; border-radius: 8px; padding: 10px 16px; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; background: #fff; cursor: pointer; display: flex; align-items: center; justify-content: space-between; margin-top: 8px; transition: background .12s; }
   .cadastro-rapido-btn:hover { background: #f3f3f3; }
   .cadastro-rapido-btn span { font-size: 20px; font-weight: 300; }

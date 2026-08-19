@@ -276,11 +276,11 @@
 </div>
 <div class="scroll-body">
 <div class="field-label">NOME DO CLIENTE</div>
-<div class="select-wrap">
-<select id="orc-cliente-input" class="field-select">
-<option disabled selected value="">Selecionar cliente...</option>
-</select>
-</div>
+<button type="button" id="orc-cliente-btn" class="cliente-picker empty" onclick="abrirPickerCliente()" aria-label="Selecionar cliente">
+<span class="cliente-picker-avatar" id="orc-cliente-avatar" aria-hidden="true">🔍</span>
+<span class="cliente-picker-text" id="orc-cliente-text">Selecionar cliente...</span>
+<span class="cliente-picker-caret" aria-hidden="true">▾</span>
+</button>
 <button class="cadastro-rapido-btn" onclick="novoContatoNoCelular()">
       NOVO CLIENTE <span>+</span>
 </button>
@@ -338,6 +338,31 @@
 <div class="sub-label" style="margin-bottom:10px;">MATERIAIS CADASTRADOS</div>
 <div id="picker-mat-list"></div>
 <div style="height:16px;"></div>
+</div>
+</div>
+<!-- ===== PICKER CLIENTE ===== -->
+<div class="screen" id="screen-picker-cliente">
+<div class="topbar">
+<div class="topbar-row">
+<button class="back-btn" onclick="navBack()" aria-label="Voltar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
+<span class="topbar-title">Selecionar Cliente</span>
+<span style="width:40px;"></span>
+</div>
+</div>
+<div class="scroll-body">
+<div class="search-box">
+<span class="search-icon">🔍</span>
+<input id="picker-cli-busca" placeholder="Buscar cliente..." type="text" autocomplete="off" oninput="renderPickerCliente()" aria-label="Buscar cliente"/>
+</div>
+<div class="clientes-count" id="picker-cli-count">0 CLIENTES</div>
+<div id="picker-cli-list"></div>
+<div style="height:16px;"></div>
+</div>
+<div class="bottom-bar" style="justify-content:flex-end;">
+<div class="bottom-action" onclick="novoContatoNoCelular()">
+<div class="fab">+</div>
+<div class="fab-label">Adicionar<br/>Cliente</div>
+</div>
 </div>
 </div>
 <!-- ===== AGENDA ===== -->
