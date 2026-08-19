@@ -136,11 +136,11 @@
 <div class="form-section-label" style="margin-bottom:6px;">DADOS DO PAGAMENTO</div>
 <div style="border-top:1.5px solid #d0d0d0;margin-bottom:14px;"></div>
 <div class="field-label">CLIENTE</div>
-<div class="select-wrap">
-<select id="pay-cliente-input" class="field-select">
-<option disabled selected value="">Selecionar cliente...</option>
-</select>
-</div>
+<button type="button" id="pay-cliente-btn" class="cliente-picker empty" onclick="abrirPickerCliente('pay')" aria-label="Selecionar cliente">
+<span class="cliente-picker-avatar" id="pay-cliente-avatar" aria-hidden="true">🔍</span>
+<span class="cliente-picker-text" id="pay-cliente-text">Selecionar cliente...</span>
+<span class="cliente-picker-caret" aria-hidden="true">▾</span>
+</button>
 <div class="field-label">SERVIÇO</div>
 <input id="pay-servico-input" class="field-input" placeholder="Ex: Instalação de quadro elétrico" type="text" maxlength="120"/>
 <div class="field-label">VALOR (R$)</div>
@@ -276,7 +276,7 @@
 </div>
 <div class="scroll-body">
 <div class="field-label">NOME DO CLIENTE</div>
-<button type="button" id="orc-cliente-btn" class="cliente-picker empty" onclick="abrirPickerCliente()" aria-label="Selecionar cliente">
+<button type="button" id="orc-cliente-btn" class="cliente-picker empty" onclick="abrirPickerCliente('orc')" aria-label="Selecionar cliente">
 <span class="cliente-picker-avatar" id="orc-cliente-avatar" aria-hidden="true">🔍</span>
 <span class="cliente-picker-text" id="orc-cliente-text">Selecionar cliente...</span>
 <span class="cliente-picker-caret" aria-hidden="true">▾</span>
@@ -437,11 +437,11 @@
 <div class="form-section-label" style="margin-bottom:6px;">DADOS DO AGENDAMENTO</div>
 <div style="border-top:1.5px solid #d0d0d0;margin-bottom:14px;"></div>
 <div class="field-label">CLIENTE</div>
-<div class="select-wrap">
-<select id="ag-cliente-input" class="field-select">
-<option disabled selected value="">Selecionar cliente...</option>
-</select>
-</div>
+<button type="button" id="ag-cliente-btn" class="cliente-picker empty" onclick="abrirPickerCliente('ag')" aria-label="Selecionar cliente">
+<span class="cliente-picker-avatar" id="ag-cliente-avatar" aria-hidden="true">🔍</span>
+<span class="cliente-picker-text" id="ag-cliente-text">Selecionar cliente...</span>
+<span class="cliente-picker-caret" aria-hidden="true">▾</span>
+</button>
 <div class="field-label">DESCRIÇÃO DO SERVIÇO <span style="font-weight:400;opacity:.6;">(opcional)</span></div>
 <input id="ag-desc-input" class="field-input" placeholder="Ex: Instalação de quadro elétrico" type="text" maxlength="120"/>
 <div class="field-row2" style="margin-top:14px;">

@@ -445,17 +445,9 @@ function clienteNome(id) {
   return c ? c.nome : 'Cliente';
 }
 
-function fillClienteSelects() {
-  var ordenados = clientes.slice().sort(function(a, b) { return a.nome.localeCompare(b.nome, 'pt-BR'); });
-  var porId = '<option disabled selected value="">Selecionar cliente...</option>'
-    + ordenados.map(function(c) { return '<option value="' + c.id + '">' + esc(c.nome) + '</option>'; }).join('');
-  var porNome = '<option disabled selected value="">Selecionar cliente...</option>'
-    + ordenados.map(function(c) { return '<option value="' + esc(c.nome) + '">' + esc(c.nome) + '</option>'; }).join('');
-  var s1 = document.getElementById('pay-cliente-input'); if (s1) s1.innerHTML = porId;
-  var s3 = document.getElementById('ag-cliente-input');  if (s3) s3.innerHTML = porNome;
-  /* o orçamento não usa <select>: escolhe pelo picker com busca
-     (abrirPickerCliente), então aqui só revalida o que está no botão */
-  setOrcCliente(_orcClienteId);
+function clientePorNome(nome) {
+  for (var i = 0; i < clientes.length; i++) if (clientes[i].nome === nome) return clientes[i];
+  return null;
 }
 
 /* ================================================================
@@ -541,7 +533,7 @@ function selectStatusPag(el) {
 }
 
 function salvarPagamento() {
-  var clienteId = document.getElementById('pay-cliente-input').value;
+  var clienteId = pickerClienteId('pay');
   var servico = document.getElementById('pay-servico-input').value.trim();
   var valorRaw = document.getElementById('pay-valor-input').value;
   var valor = moedaParaNumero(valorRaw);
@@ -572,7 +564,7 @@ function salvarPagamento() {
   pagamentos.unshift(pag);
   persistPut('pagamentos', pag, function() {
     showToast('Pagamento registrado!');
-    document.getElementById('pay-cliente-input').selectedIndex = 0;
+    setPickerCliente('pay', '');
     document.getElementById('pay-servico-input').value = '';
     document.getElementById('pay-valor-input').value = '';
     document.getElementById('pay-data-input').value = '';
@@ -1166,7 +1158,7 @@ function criarOrcamentoDoCompromisso() {
   novoOrcamento();
   var achou = false;
   for (var i = 0; i < clientes.length; i++) {
-    if (clientes[i].nome === a.cliente) { setOrcCliente(clientes[i].id); achou = true; break; }
+    if (clientes[i].nome === a.cliente) { setPickerCliente('orc', clientes[i].id); achou = true; break; }
   }
   if (!achou) showToast('Cliente não cadastrado — selecione manualmente.');
 }
@@ -1227,7 +1219,7 @@ function cancelarAgendamento() {
 function novoAgendamento() {
   _agEditId = null;
   document.getElementById('ag-form-title').textContent = 'Novo Agendamento';
-  document.getElementById('ag-cliente-input').selectedIndex = 0;
+  setPickerCliente('ag', '');
   document.getElementById('ag-desc-input').value = '';
   document.getElementById('ag-data-input').value = '';
   document.getElementById('ag-hora-input').value = '';
@@ -1242,7 +1234,10 @@ function editarAgendamento() {
   if (!a) return;
   _agEditId = a.id;
   document.getElementById('ag-form-title').textContent = 'Editar Agendamento';
-  document.getElementById('ag-cliente-input').value = a.cliente;
+  /* compromisso antigo pode apontar pra um contato que saiu da lista:
+     o nome continua no botão mesmo sem id correspondente */
+  var cliAg = clientePorNome(a.cliente);
+  setPickerCliente('ag', cliAg ? cliAg.id : '', a.cliente);
   document.getElementById('ag-desc-input').value = a.desc;
   document.getElementById('ag-data-input').value = a.data;
   document.getElementById('ag-hora-input').value = a.hora;
@@ -1252,7 +1247,7 @@ function editarAgendamento() {
 }
 
 function salvarAgendamento() {
-  var cliente = document.getElementById('ag-cliente-input').value;
+  var cliente = pickerClienteNome('ag');
   var desc    = document.getElementById('ag-desc-input').value.trim();
   var data    = document.getElementById('ag-data-input').value;
   var hora    = document.getElementById('ag-hora-input').value;
@@ -1280,7 +1275,7 @@ function salvarAgendamento() {
   persistPut('agendamentos', ag, function() {
     showToast('Agendamento salvo!');
     agendarNotificacoesAg(ag); /* (re)agenda os 5 lembretes nativos */
-    document.getElementById('ag-cliente-input').selectedIndex = 0;
+    setPickerCliente('ag', '');
     document.getElementById('ag-desc-input').value = '';
     document.getElementById('ag-data-input').value = '';
     document.getElementById('ag-hora-input').value = '';
@@ -1716,7 +1711,7 @@ function excluirCliente() {
       agendamentos = agendamentos.filter(function(a) { return a.cliente !== c.nome; });
       _perfilClienteId = null;
       showToast('Cliente excluído.');
-      fillClienteSelects();
+      refreshPickerBotoes();
       renderClientes();
       goTo('screen-clientes');
     };
@@ -1952,7 +1947,7 @@ function sincronizarContatos(interativo) {
     }
 
     var aplicar = function() {
-      fillClienteSelects();
+      refreshPickerBotoes();
       if (activeScreenId() === 'screen-clientes') renderClientes();
       if (interativo) showToast(aGravar.length + ' contato(s) sincronizado(s).');
     };
@@ -2073,12 +2068,17 @@ function salvarCliente() {
 
   persistPut('clientes', cli, function() {
     showToast(editando ? 'Cliente atualizado!' : 'Cliente salvo com sucesso!');
-    fillClienteSelects();
+    refreshPickerBotoes();
     renderClientes();
     if (editando) {
       abrirPerfilCliente(cli.id);
-    } else if (_cliReturn === 'screen-orcamento' || _cliReturn === 'screen-picker-cliente') {
-      setOrcCliente(cli.id);
+    } else if (_cliReturn === 'screen-picker-cliente') {
+      /* cadastro aberto de dentro do picker: volta pra tela de origem dele
+         já com o cliente novo escolhido */
+      setPickerCliente(_pickerAlvo, cli.id);
+      goTo(_pickerAlvos[_pickerAlvo].volta);
+    } else if (_cliReturn === 'screen-orcamento') {
+      setPickerCliente('orc', cli.id);
       goTo('screen-orcamento');
     } else {
       goTo('screen-clientes');
@@ -2115,7 +2115,7 @@ function novoOrcamento() {
   orcamentoAtual = { materiais: [], maoDeObra: [] };
   _orcEditId = null;
   document.getElementById('orc-form-title').textContent = 'Novo Orçamento';
-  setOrcCliente('');
+  setPickerCliente('orc', '');
   document.getElementById('orc-erro').style.display = 'none';
   goTo('screen-orcamento');
 }
@@ -2203,30 +2203,59 @@ function adicionarMobOrc() {
   renderOrcamento();
 }
 
-/* ── PICKER DE CLIENTE DO ORÇAMENTO ──
-   substitui o <select> nativo: mesma linguagem visual do app (.cliente-row,
-   cores da marca) e busca digitada, pra não precisar rolar até o contato. */
+/* ── PICKER DE CLIENTE ──
+   substitui os <select> nativos de orçamento, pagamento e agenda: mesma
+   linguagem visual do app (.cliente-row, cores da marca) e busca digitada,
+   pra não precisar rolar até o contato.
 
-var _orcClienteId = '';
+   Cada alvo guarda a escolha. O `nome` vive separado do `id` porque o
+   agendamento grava o cliente só pelo nome (SPEC §5): um compromisso antigo
+   cujo contato saiu da lista ainda mostra o nome no botão. */
+
+var _pickerAlvos = {
+  orc: { volta: 'screen-orcamento',        id: '', nome: '' },
+  pay: { volta: 'screen-novo-pagamento',   id: '', nome: '' },
+  ag:  { volta: 'screen-novo-agendamento', id: '', nome: '' }
+};
+var _pickerAlvo = 'orc';
 
 /* busca sem acento e sem caixa */
 function _semAcento(s) {
   return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
-/* fonte única da verdade do cliente do orçamento: guarda o id e redesenha
-   o botão. setOrcCliente('') limpa a seleção. */
-function setOrcCliente(id) {
+/* fonte única da verdade de cada alvo: guarda a escolha e redesenha o botão.
+   setPickerCliente(alvo, '') limpa. `nomeSolto` preenche o rótulo quando o
+   nome salvo não corresponde a nenhum cliente cadastrado. */
+function setPickerCliente(alvo, id, nomeSolto) {
+  var t = _pickerAlvos[alvo];
+  if (!t) return;
   var c = id ? clienteById(id) : null;
-  _orcClienteId = c ? c.id : '';
-  var btn = document.getElementById('orc-cliente-btn');
+  t.id = c ? c.id : '';
+  t.nome = c ? c.nome : (nomeSolto || '');
+  var btn = document.getElementById(alvo + '-cliente-btn');
   if (!btn) return;
-  btn.classList.toggle('empty', !c);
-  document.getElementById('orc-cliente-avatar').textContent = c ? iniciais(c.nome) : '🔍';
-  document.getElementById('orc-cliente-text').textContent = c ? c.nome : 'Selecionar cliente...';
+  btn.classList.toggle('empty', !t.nome);
+  document.getElementById(alvo + '-cliente-avatar').textContent = t.nome ? iniciais(t.nome) : '🔍';
+  document.getElementById(alvo + '-cliente-text').textContent = t.nome || 'Selecionar cliente...';
 }
 
-function abrirPickerCliente() {
+function pickerClienteId(alvo) { return _pickerAlvos[alvo] ? _pickerAlvos[alvo].id : ''; }
+function pickerClienteNome(alvo) { return _pickerAlvos[alvo] ? _pickerAlvos[alvo].nome : ''; }
+
+/* revalida os botões depois de qualquer mexida na lista de clientes */
+function refreshPickerBotoes() {
+  for (var alvo in _pickerAlvos) {
+    var t = _pickerAlvos[alvo];
+    /* contato apagado no meio do preenchimento: limpa, senão o botão fica
+       exibindo um nome que já não seleciona ninguém */
+    if (t.id && !clienteById(t.id)) { setPickerCliente(alvo, ''); continue; }
+    setPickerCliente(alvo, t.id, t.nome);
+  }
+}
+
+function abrirPickerCliente(alvo) {
+  _pickerAlvo = _pickerAlvos[alvo] ? alvo : 'orc';
   var busca = document.getElementById('picker-cli-busca');
   if (busca) busca.value = '';
   goTo('screen-picker-cliente');
@@ -2235,6 +2264,7 @@ function abrirPickerCliente() {
 function renderPickerCliente() {
   var list = document.getElementById('picker-cli-list');
   if (!list) return;
+  var escolhido = pickerClienteId(_pickerAlvo);
   var busca = _semAcento((document.getElementById('picker-cli-busca') || {}).value);
   var items = clientes.slice().sort(function(a, b) { return a.nome.localeCompare(b.nome, 'pt-BR'); })
     .filter(function(c) {
@@ -2256,8 +2286,8 @@ function renderPickerCliente() {
   }
 
   list.innerHTML = items.map(function(c) {
-    var sel = c.id === _orcClienteId;
-    return '<div class="cliente-row' + (sel ? ' selected' : '') + '" onclick="escolherClienteOrc(\'' + c.id + '\')" role="button" aria-label="Selecionar ' + esc(c.nome) + '">'
+    var sel = c.id === escolhido;
+    return '<div class="cliente-row' + (sel ? ' selected' : '') + '" onclick="escolherClientePicker(\'' + c.id + '\')" role="button" aria-label="Selecionar ' + esc(c.nome) + '">'
       + '<div class="avatar">' + esc(iniciais(c.nome)) + '</div>'
       + '<div class="cliente-info">'
       + '<div class="cnome">' + esc(c.nome) + '</div>'
@@ -2268,9 +2298,9 @@ function renderPickerCliente() {
   }).join('');
 }
 
-function escolherClienteOrc(id) {
-  setOrcCliente(id);
-  goTo('screen-orcamento');
+function escolherClientePicker(id) {
+  setPickerCliente(_pickerAlvo, id);
+  goTo(_pickerAlvos[_pickerAlvo].volta);
 }
 
 function renderPickerMaterial() {
@@ -2538,7 +2568,7 @@ function salvarOrcamentoPDF() { saveOrcamento('enviado', true); }
 
 function saveOrcamento(status, gerarPdf) {
   var erro = document.getElementById('orc-erro');
-  var clienteId = _orcClienteId;
+  var clienteId = pickerClienteId('orc');
   if (orcamentoAtual.materiais.length === 0 && orcamentoAtual.maoDeObra.length === 0) {
     erro.textContent = 'Adicione itens ao orçamento primeiro.';
     erro.style.display = 'block';
@@ -2577,7 +2607,7 @@ function saveOrcamento(status, gerarPdf) {
     }
     showToast(status === 'rascunho' ? 'Rascunho salvo!' : (pdfOk ? 'Orçamento salvo — PDF gerado!' : 'Orçamento salvo!'));
     orcamentoAtual = { materiais: [], maoDeObra: [] };
-    setOrcCliente('');
+    setPickerCliente('orc', '');
     goTo('screen-home');
   });
 }
@@ -2785,7 +2815,7 @@ function editarOrcamento() {
     maoDeObra: o.maoDeObra.map(function(m) { return Object.assign({}, m); })
   };
   document.getElementById('orc-form-title').textContent = 'Editar Orçamento';
-  setOrcCliente(o.clienteId);
+  setPickerCliente('orc', o.clienteId);
   goTo('screen-orcamento');
 }
 
@@ -3267,7 +3297,7 @@ function aplicarBackup(dados) {
     /* re-hidrata da fonte de verdade em vez de remendar a memória */
     return loadAll().then(carregarPerfilEletricista).then(carregarCategorias);
   }).then(function() {
-    fillClienteSelects();
+    refreshPickerBotoes();
     renderHomeAgenda();
     renderHomeOrcamentos();
     renderPayHome();
@@ -3296,7 +3326,7 @@ openDB().then(function() {
     showToast('Armazenamento indisponível — os dados não serão salvos neste navegador.');
   }, 500);
 }).then(function() {
-  fillClienteSelects();
+  refreshPickerBotoes();
   renderHomeAgenda();
   renderHomeOrcamentos();
   renderPayHome();
