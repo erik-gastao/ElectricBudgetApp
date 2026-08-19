@@ -24,8 +24,18 @@ const GRADLE = 'android/app/build.gradle';
 
 /* ── 1. AndroidManifest ── */
 
+/* WRITE_CONTACTS está aqui mesmo o app nunca escrevendo na agenda (criar
+   contato é delegado ao app de Contatos via AppLauncher). O alias
+   `contacts` do @capacitor-community/contacts cobre READ + WRITE, e o
+   Capacitor recusa requestPermissions() se qualquer permissão do alias
+   faltar no manifest — com só READ declarado, a chamada lançava
+   "Missing the following permissions in AndroidManifest.xml:
+   android.permission.WRITE_CONTACTS" e o sync morria antes do prompt.
+   As duas caem no mesmo grupo de permissão do Android, então o usuário
+   continua vendo um único pedido de acesso aos contatos. */
 const PERMISSOES = [
   'android.permission.READ_CONTACTS',
+  'android.permission.WRITE_CONTACTS',
   'android.permission.POST_NOTIFICATIONS',
 ];
 

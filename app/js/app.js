@@ -1976,7 +1976,15 @@ function sincronizarContatos(interativo) {
   }).catch(function(e) {
     diag('sync: EXCEÇÃO não tratada →', e);
     console.error('sincronizarContatos', e);
-    if (interativo) showToast(MSG_FALHA_CONTATOS['erro-leitura']);
+    /* Permissão faltando no AndroidManifest é erro de build, não de uso —
+       nenhum ajuste no celular resolve. Vale dizer isso em vez de mandar
+       o usuário procurar um botão que não existe. */
+    var manifestIncompleto = e && /Missing the following permissions/i.test(String(e.message || e));
+    if (interativo) {
+      showToast(manifestIncompleto
+        ? 'Esta versão do app foi publicada sem as permissões de contatos. Veja Meu Perfil › Diagnóstico.'
+        : MSG_FALHA_CONTATOS['erro-leitura']);
+    }
   }).then(function() {
     _syncEmAndamento = false;
   });
