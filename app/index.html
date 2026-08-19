@@ -8,6 +8,11 @@
      estilos inline herdados do protótipo. -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
 <meta name="theme-color" content="#1e3a5f">
+<!-- O app tem paleta própria (creme/âmbar/marinho) e não tem tema escuro.
+     Sem esta declaração o WebView do Android 10+ aplica "algorithmic
+     darkening" quando o celular está em modo escuro e inverte as cores,
+     deixando as listas com aparência de dark mode genérico. -->
+<meta name="color-scheme" content="light">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -83,7 +88,7 @@
 <div class="screen" id="screen-pagamentos">
 <div class="topbar">
 <div class="topbar-row">
-<button class="back-btn" onclick="goTo('screen-home')" aria-label="Voltar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
+<button class="back-btn" onclick="navBack()" aria-label="Voltar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
 <span class="topbar-title">Pagamentos</span>
 <span style="width:40px;"></span>
 </div>
@@ -122,7 +127,7 @@
 <div class="screen" id="screen-novo-pagamento">
 <div class="topbar">
 <div class="topbar-row">
-<button class="back-btn" onclick="goTo('screen-pagamentos')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
+<button class="back-btn" onclick="navBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
 <span class="topbar-title">Registrar Pagamento</span>
 <span style="width:40px;"></span>
 </div>
@@ -139,7 +144,7 @@
 <div class="field-label">SERVIÇO</div>
 <input id="pay-servico-input" class="field-input" placeholder="Ex: Instalação de quadro elétrico" type="text" maxlength="120"/>
 <div class="field-label">VALOR (R$)</div>
-<input id="pay-valor-input" class="field-input" placeholder="0,00" type="number" step="0.01" min="0" max="9999999"/>
+<input id="pay-valor-input" class="field-input" placeholder="0,00" type="text" inputmode="numeric" maxlength="14" oninput="mascaraMoeda(this)"/>
 <div class="field-label">FORMA DE PAGAMENTO</div>
 <div class="filter-row" id="pay-forma-row" style="flex-wrap:wrap;gap:6px;">
 <div class="filter-chip active" onclick="selectForma(this)">PIX</div>
@@ -165,7 +170,7 @@
 <div class="screen" id="screen-clientes">
 <div class="topbar">
 <div class="topbar-row">
-<button class="back-btn" onclick="goTo('screen-home')" aria-label="Voltar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
+<button class="back-btn" onclick="navBack()" aria-label="Voltar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
 <span class="topbar-title">Lista Clientes</span>
 <span style="width:40px;"></span>
 </div>
@@ -177,41 +182,15 @@
 <input id="cli-busca" placeholder="Buscar cliente..." type="text" oninput="renderClientes()"/>
 </div>
 <div class="clientes-count" id="clientes-count">0 CLIENTES CADASTRADOS</div>
-<button id="btn-contatos-tel" class="full-btn" style="display:none;background:var(--ink);box-shadow:none;margin-bottom:12px;" onclick="abrirContatosTelefone()">📱 CONTATOS DO CELULAR</button>
+<button id="btn-contatos-tel" class="sync-btn" style="display:none;" onclick="abrirContatosTelefone()"><span aria-hidden="true">🔄</span> SINCRONIZAR COM O CELULAR</button>
 <div id="clientes-list"></div>
 <div class="scroll-indicator">▽</div>
 <div style="height:16px;"></div>
 </div>
 <div class="bottom-bar" style="justify-content:flex-end;">
-<div class="bottom-action" onclick="novoCliente()">
+<div class="bottom-action" onclick="novoContatoNoCelular()">
 <div class="fab">+</div>
-<div class="fab-label">Adicionar<br/>Cliente</div>
-</div>
-</div>
-</div>
-<!-- ===== CONTATOS DO CELULAR (F7 · §2/§7) ===== -->
-<div class="screen" id="screen-contatos-tel">
-<div class="topbar">
-<div class="topbar-row">
-<button class="back-btn" onclick="goTo('screen-clientes')" aria-label="Voltar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
-<span class="topbar-title">Contatos do Celular</span>
-<span style="width:40px;"></span>
-</div>
-</div>
-<div class="scroll-body">
-<div class="sub-label">DO SEU CELULAR</div>
-<div class="search-box">
-<span class="search-icon">🔍</span>
-<input id="contato-busca" placeholder="Buscar contato..." type="text" oninput="renderContatosTelefone()"/>
-</div>
-<div style="font-size:12px;color:#94785A;margin:4px 0 10px;">Toque num contato para adicioná-lo como cliente.</div>
-<div id="contatos-tel-list"><div class="empty-state">Carregando contatos…</div></div>
-<div style="height:16px;"></div>
-</div>
-<div class="bottom-bar" style="justify-content:flex-end;">
-<div class="bottom-action" onclick="abrirAppContatos()">
-<div class="fab">+</div>
-<div class="fab-label">Novo no<br/>Celular</div>
+<div class="fab-label" id="cli-fab-label">Adicionar<br/>Cliente</div>
 </div>
 </div>
 </div>
@@ -219,7 +198,7 @@
 <div class="screen" id="screen-materiais">
 <div class="topbar">
 <div class="topbar-row">
-<button class="back-btn" onclick="goTo('screen-home')" aria-label="Voltar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
+<button class="back-btn" onclick="navBack()" aria-label="Voltar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
 <span class="topbar-title">Lista Materiais</span>
 <span style="width:40px;"></span>
 </div>
@@ -230,13 +209,9 @@
 <span class="search-icon">🔍</span>
 <input id="mat-busca" placeholder="Buscar material..." type="text" oninput="renderMateriais()"/>
 </div>
-<div class="filter-row" id="mat-filter-row">
-<div class="filter-chip active" onclick="filterMateriais(this)">TODOS</div>
-<div class="filter-chip" onclick="filterMateriais(this)">FIOS</div>
-<div class="filter-chip" onclick="filterMateriais(this)">DISJUNTORES</div>
-<div class="filter-chip" onclick="filterMateriais(this)">TOMADAS</div>
-<div class="filter-chip" onclick="filterMateriais(this)">ILUMINAÇÃO</div>
-</div>
+<!-- chips renderizados por renderChipsCategorias() — as categorias são
+     editáveis pelo usuário e vivem no store `preferencias` -->
+<div class="filter-row" id="mat-filter-row"></div>
 <div id="mat-list"></div>
 <div class="scroll-indicator">▽</div>
 <div style="height:16px;"></div>
@@ -252,7 +227,7 @@
 <div class="screen" id="screen-novo-material">
 <div class="topbar">
 <div class="topbar-row">
-<button class="back-btn" onclick="goTo('screen-materiais')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
+<button class="back-btn" onclick="navBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
 <span class="topbar-title" id="mat-form-title">Novo Material</span>
 <span style="width:40px;"></span>
 </div>
@@ -263,13 +238,7 @@
 <div class="field-label">NOME DO MATERIAL</div>
 <input id="mat-nome-input" class="field-input" placeholder="Ex: Fio 2,5mm² Flexível" type="text" maxlength="120"/>
 <div class="field-label">CATEGORIA</div>
-<div class="filter-row" id="mat-cat-row" style="flex-wrap:wrap;gap:6px;">
-<div class="filter-chip active" onclick="selectCategoria(this)">FIOS</div>
-<div class="filter-chip" onclick="selectCategoria(this)">DISJUNTORES</div>
-<div class="filter-chip" onclick="selectCategoria(this)">TOMADAS</div>
-<div class="filter-chip" onclick="selectCategoria(this)">ILUMINAÇÃO</div>
-<div class="filter-chip" onclick="selectCategoria(this)">OUTROS</div>
-</div>
+<div class="filter-row" id="mat-cat-row" style="flex-wrap:wrap;gap:6px;"></div>
 <div class="field-row2" style="margin-top:14px;">
 <div>
 <div class="field-label" style="margin-top:0;">UNIDADE</div>
@@ -285,7 +254,7 @@
 </div>
 <div>
 <div class="field-label" style="margin-top:0;">PREÇO (R$)</div>
-<input id="mat-preco-input" class="field-input" placeholder="0,00" type="number" step="0.01" min="0" max="9999999"/>
+<input id="mat-preco-input" class="field-input" placeholder="0,00" type="text" inputmode="numeric" maxlength="14" oninput="mascaraMoeda(this)"/>
 </div>
 </div>
 <div id="mat-erro" style="display:none;color:#ef4444;font-size:12px;margin-top:10px;font-weight:600;"></div>
@@ -300,7 +269,7 @@
 <div class="screen" id="screen-orcamento">
 <div class="topbar">
 <div class="topbar-row">
-<button class="back-btn" onclick="goTo('screen-home')" aria-label="Voltar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
+<button class="back-btn" onclick="navBack()" aria-label="Voltar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
 <span class="topbar-title" id="orc-form-title">Novo Orçamento</span>
 <span style="width:40px;"></span>
 </div>
@@ -312,8 +281,8 @@
 <option disabled selected value="">Selecionar cliente...</option>
 </select>
 </div>
-<button class="cadastro-rapido-btn" onclick="novoCliente()">
-      CADASTRO RÁPIDO <span>+</span>
+<button class="cadastro-rapido-btn" onclick="novoContatoNoCelular()">
+      NOVO CLIENTE <span>+</span>
 </button>
 <div class="form-section">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
@@ -335,7 +304,7 @@
 <div id="orc-mob-form" style="display:none;margin-bottom:10px;">
 <input id="mob-nome-input" class="field-input" placeholder="Ex: Instalação de quadro" type="text" maxlength="120" style="margin-bottom:6px;"/>
 <div style="display:flex;gap:8px;align-items:center;">
-<input id="mob-valor-input" class="field-input" placeholder="Valor R$" type="number" step="0.01" min="0" max="9999999" style="flex:1;"/>
+<input id="mob-valor-input" class="field-input" placeholder="Valor R$" type="text" inputmode="numeric" maxlength="14" oninput="mascaraMoeda(this)" style="flex:1;"/>
 <button onclick="adicionarMobOrc()" style="background:#1e3a5f;color:#fff;border:none;border-radius:8px;padding:9px 14px;font-weight:700;font-size:13px;cursor:pointer;">OK</button>
 </div>
 </div>
@@ -360,7 +329,7 @@
 <div class="screen" id="screen-picker-material">
 <div class="topbar">
 <div class="topbar-row">
-<button class="back-btn" onclick="goTo('screen-orcamento')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
+<button class="back-btn" onclick="navBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
 <span class="topbar-title">Selecionar Material</span>
 <span style="width:40px;"></span>
 </div>
@@ -375,7 +344,7 @@
 <div class="screen" id="screen-agenda">
 <div class="topbar">
 <div class="topbar-row">
-<button class="back-btn" onclick="goTo('screen-home')" aria-label="Voltar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
+<button class="back-btn" onclick="navBack()" aria-label="Voltar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
 <span class="topbar-title">Agenda</span>
 <span style="width:40px;"></span>
 </div>
@@ -397,7 +366,7 @@
 <div class="screen" id="screen-detalhe-agendamento">
 <div class="topbar">
 <div class="topbar-row">
-<button class="back-btn" onclick="goTo('screen-agenda')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
+<button class="back-btn" onclick="navBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
 <span class="topbar-title">Compromisso</span>
 <span style="width:40px;"></span>
 </div>
@@ -434,7 +403,7 @@
 <div class="screen" id="screen-novo-agendamento">
 <div class="topbar">
 <div class="topbar-row">
-<button class="back-btn" onclick="goTo('screen-agenda')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
+<button class="back-btn" onclick="navBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
 <span class="topbar-title" id="ag-form-title">Novo Agendamento</span>
 <span style="width:40px;"></span>
 </div>
@@ -473,7 +442,7 @@
 <div class="screen" id="screen-novo-cliente">
 <div class="topbar">
 <div class="topbar-row">
-<button class="back-btn" onclick="history_back()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
+<button class="back-btn" onclick="navBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
 <span class="topbar-title" id="cli-form-title">Novo Cliente</span>
 <span style="width:40px;"></span>
 </div>
@@ -515,7 +484,7 @@
 <div class="screen" id="screen-perfil-cliente">
 <div class="topbar">
 <div class="topbar-row">
-<button class="back-btn" onclick="goTo('screen-clientes')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
+<button class="back-btn" onclick="navBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
 <span class="topbar-title">Perfil do Cliente</span>
 <span style="width:40px;"></span>
 </div>
@@ -565,7 +534,7 @@
 <div class="screen" id="screen-notificacoes">
 <div class="topbar">
 <div class="topbar-row">
-<button class="back-btn" onclick="goTo('screen-home')" aria-label="Voltar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
+<button class="back-btn" onclick="navBack()" aria-label="Voltar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
 <span class="topbar-title">Notificações</span>
 <span style="width:40px;"></span>
 </div>
@@ -581,7 +550,7 @@
 <div class="screen" id="screen-orcamento-detalhe">
 <div class="topbar">
 <div class="topbar-row">
-<button class="back-btn" onclick="voltarDoOrcDetalhe()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
+<button class="back-btn" onclick="navBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
 <span class="topbar-title">Orçamento</span>
 <span style="width:40px;"></span>
 </div>
@@ -612,6 +581,7 @@
 <div class="orc-total-row"><span>MÃO DE OBRA</span><span id="od-total-mob">R$ 0,00</span></div>
 <div class="orc-total-row total-main"><span>TOTAL</span><span id="od-total-geral">R$ 0,00</span></div>
 </div>
+<button class="excluir-btn" onclick="excluirOrcamento()">EXCLUIR ORÇAMENTO</button>
 <div style="height:16px;"></div>
 </div>
 <div class="dual-btns" id="od-btns"></div>
@@ -620,7 +590,7 @@
 <div class="screen" id="screen-perfil-eletricista">
 <div class="topbar">
 <div class="topbar-row">
-<button class="back-btn" onclick="goTo('screen-home')" aria-label="Voltar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
+<button class="back-btn" onclick="navBack()" aria-label="Voltar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
 <span class="topbar-title">Meu Perfil</span>
 <span style="width:40px;"></span>
 </div>
@@ -660,6 +630,16 @@
 <span class="config-label">Avisos de pagamento atrasado</span>
 <div class="toggle" data-key="notif-atraso" onclick="toggleSwitch(this)"><div class="toggle-knob"></div></div>
 </div>
+<div class="form-section-label" style="margin-bottom:6px;margin-top:20px;">BACKUP</div>
+<div style="border-top:1.5px solid #222;margin-bottom:10px;"></div>
+<div style="font-size:12px;color:#94785A;margin-bottom:10px;line-height:1.5;">
+Salva clientes, orçamentos, pagamentos, agenda e materiais num arquivo.
+Use antes de trocar de celular ou se precisar desinstalar o app.
+</div>
+<button class="sync-btn" onclick="exportarBackup()"><span aria-hidden="true">⬇</span> EXPORTAR BACKUP</button>
+<button class="sync-btn" onclick="document.getElementById('backup-file').click()"><span aria-hidden="true">⬆</span> RESTAURAR BACKUP</button>
+<input id="backup-file" type="file" accept="application/json,.json" style="display:none;" onchange="importarBackup(this)"/>
+
 <div class="form-section-label" style="margin-bottom:6px;margin-top:20px;">SOBRE</div>
 <div style="border-top:1.5px solid #222;margin-bottom:14px;"></div>
 <div class="about-row"><span>Versão</span><span class="about-val">1.0.0</span></div>
@@ -671,7 +651,7 @@
 <div class="screen" id="screen-relatorio">
 <div class="topbar">
 <div class="topbar-row">
-<button class="back-btn" onclick="goTo('screen-home')" aria-label="Voltar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
+<button class="back-btn" onclick="navBack()" aria-label="Voltar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
 <span class="topbar-title">Relatório</span>
 <span style="width:40px;"></span>
 </div>
@@ -705,7 +685,7 @@
 <div class="screen" id="screen-lista-orcamentos">
 <div class="topbar">
 <div class="topbar-row">
-<button class="back-btn" onclick="goTo('screen-home')" aria-label="Voltar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
+<button class="back-btn" onclick="navBack()" aria-label="Voltar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
 <span class="topbar-title">Orçamentos</span>
 <span style="width:40px;"></span>
 </div>
@@ -734,7 +714,7 @@
 <div class="screen" id="screen-editar-perfil">
 <div class="topbar">
 <div class="topbar-row">
-<button class="back-btn" onclick="goTo('screen-perfil-eletricista')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
+<button class="back-btn" onclick="navBack()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
 <span class="topbar-title">Editar Perfil</span>
 <span style="width:40px;"></span>
 </div>
@@ -772,6 +752,20 @@
 </div>
 </div>
 </div>
+<!-- entrada de texto curta (nova categoria de material).
+     prompt() nativo trava o WebView do Capacitor — por isso um modal próprio. -->
+<div id="texto-modal" class="confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="texto-msg">
+<div class="confirm-box">
+<div class="confirm-msg" id="texto-msg">Nome</div>
+<input id="texto-input" class="venc-input" type="text" maxlength="24" aria-label="Valor"/>
+<div id="texto-erro" style="display:none;color:#ef4444;font-size:12px;margin-bottom:10px;font-weight:600;"></div>
+<div class="confirm-btns">
+<button class="confirm-btn" onclick="textoCancel()">CANCELAR</button>
+<button class="confirm-btn danger" style="background:var(--brand-dark);border-color:var(--brand-dark);" onclick="textoOk()">SALVAR</button>
+</div>
+</div>
+</div>
+
 <div id="venc-modal" class="confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="venc-msg">
 <div class="confirm-box">
 <div class="confirm-msg" id="venc-msg">Data de vencimento do pagamento:</div>

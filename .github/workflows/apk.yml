@@ -34,6 +34,22 @@ jobs:
       - name: Gerar projeto Android
         run: npx cap add android
 
+      # O keystore precisa existir ANTES do patch — patch-android.mjs só
+      # injeta a signingConfig se encontrar o arquivo.
+      - name: Restaurar keystore de release
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            printf '%s' "$KEYSTORE_B64" | base64 -d > android/app/release.keystore
+            echo "SIGNED=true" >> "$GITHUB_ENV"
+          fi
+
+      # android/ não é versionado: permissões (contatos) e assinatura
+      # precisam ser reaplicadas a cada build.
+      - name: Patch do projeto Android
+        run: node scripts/patch-android.mjs
+
       - name: Ícones e splash
         run: npx capacitor-assets generate --android
         continue-on-error: true
@@ -41,17 +57,28 @@ jobs:
       - name: Sync
         run: npx cap sync android
 
-      - name: Build APK (debug)
+      - name: Build APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          if [ "$SIGNED" = "true" ]; then
+            ./gradlew assembleRelease --no-daemon
+            echo "APK_PATH=android/app/build/outputs/apk/release/app-release.apk" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Sem ANDROID_KEYSTORE_BASE64 — APK de debug. Cada release terá assinatura diferente e exigirá desinstalar o app (perde os dados)."
+            ./gradlew assembleDebug --no-daemon
+            echo "APK_PATH=android/app/build/outputs/apk/debug/app-debug.apk" >> "$GITHUB_ENV"
+          fi
 
       - name: Renomear APK
         run: |
           NAME="electric-budget-${GITHUB_REF_NAME}.apk"
           [ "${GITHUB_REF_NAME}" = "" ] && NAME="electric-budget.apk"
-          cp android/app/build/outputs/apk/debug/app-debug.apk "$NAME"
+          cp "$APK_PATH" "$NAME"
           echo "APK_NAME=$NAME" >> "$GITHUB_ENV"
 
       - name: Upload artifact (sempre)
@@ -68,13 +95,19 @@ jobs:
           body: |
             ## Electric Budget — ${{ github.ref_name }}
 
-            APK Android (assinado com chave de debug, para instalação direta).
+            APK Android para instalação direta.
 
             **Instalar no celular:**
             1. Baixe o `.apk` abaixo
             2. Abra o arquivo no aparelho
             3. Autorize "instalar de fontes desconhecidas" quando pedido
             4. Abra pelo ícone ⚡
+
+            **Atualizando de uma versão anterior:** instale por cima, sem
+            desinstalar — seus dados são preservados. Se o Android recusar
+            a instalação, a versão antiga foi assinada com outra chave:
+            faça o backup pelo app (Meu Perfil → Backup) antes de
+            desinstalar, e restaure depois.
 
             App offline-first: funciona sem internet após o primeiro uso.
             Também disponível como PWA: https://erik-gastao.github.io/ElectricBudgetApp/

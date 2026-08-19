@@ -1,4 +1,8 @@
 :root {
+    /* trava o tema claro: reforça o <meta name="color-scheme"> e impede
+       que o WebView do Android inverta as cores quando o celular está
+       no modo escuro (algorithmic darkening) */
+    color-scheme: light;
     --brand: #F5A623;
     --brand-dark: #D9890A;
     --brand-light: #FFF3DE;
@@ -130,6 +134,17 @@
   }
   .filter-chip.active { background: var(--ink); color: #fff; border-color: var(--ink); }
   .filter-chip:hover:not(.active) { background: var(--surface-alt); }
+  /* chip de categoria criada pelo usuário: texto + ✕ de remoção */
+  .filter-chip > span { display: inline; }
+  .chip-x { margin-left: 6px; opacity: .55; font-size: 11px; }
+  .chip-x:hover { opacity: 1; color: #ef4444; }
+  .filter-chip.active .chip-x:hover { color: #fca5a5; }
+  /* "+ NOVA": tracejado, para não parecer uma categoria de verdade */
+  .filter-chip.nova {
+    border-style: dashed; border-color: var(--brand-dark);
+    color: var(--brand-dark); background: var(--brand-light); font-weight: 800;
+  }
+  .filter-chip.nova:hover:not(.active) { background: var(--brand-light); filter: brightness(0.97); }
 
   /* PAY ITEM CARD */
   .pay-item-card { border: 1.5px solid #F0E4D0; border-radius: 10px; padding: 12px; margin-bottom: 10px; background: #fff; box-shadow: 0 1px 3px rgba(30,58,95,0.06); }
@@ -156,11 +171,34 @@
   .search-icon { font-size: 17px; color: var(--brand-dark); }
   .search-box input { border: none; outline: none; font-size: 14px; flex: 1; color: var(--ink); background: transparent; }
   .clientes-count { font-size: 11px; color: #94785A; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 10px; font-weight: 700; }
-  .cliente-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #F0E4D0; cursor: pointer; transition: background .12s; }
-  .cliente-row:hover { background: var(--surface-alt); }
+  /* card no mesmo idioma visual de .agenda-card / .orc-hist-row:
+     fundo creme, borda âmbar à esquerda, sem linha divisória seca */
+  .cliente-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 12px; margin-bottom: 8px;
+    border: 1.5px solid #F0DDBB; border-left: 4px solid var(--brand);
+    border-radius: 8px; background: var(--surface-alt);
+    cursor: pointer; transition: filter .12s, transform .08s;
+  }
+  .cliente-row:active { transform: scale(0.99); }
+  .cliente-row:hover { filter: brightness(0.985); }
   .avatar { width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, var(--ink) 0%, var(--ink-light) 100%); flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; color: #fff; }
-  .cliente-info .cnome { font-size: 14px; font-weight: 700; color: var(--ink); }
+  .cliente-info { min-width: 0; flex: 1; }
+  .cliente-info .cnome { font-size: 15px; font-weight: 700; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cliente-info .ccel { font-size: 12px; color: #8a7a64; }
+  .cliente-chevron { color: var(--brand-dark); font-size: 18px; font-weight: 700; flex-shrink: 0; }
+  /* marca de origem: cliente espelhado da agenda do celular */
+  .cliente-sync { font-size: 10px; color: var(--brand-dark); letter-spacing: .3px; font-weight: 700; text-transform: uppercase; }
+
+  /* botão de sincronizar contatos */
+  .sync-btn {
+    width: 100%; border: 1.5px dashed var(--brand-dark); border-radius: 10px;
+    padding: 10px 0; margin-bottom: 12px;
+    font-size: 12px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase;
+    background: var(--brand-light); color: var(--brand-dark);
+    cursor: pointer; transition: filter .12s;
+  }
+  .sync-btn:hover { filter: brightness(0.97); }
 
   /* SCROLL INDICATOR */
   .scroll-indicator { text-align: center; padding: 4px 0 0; color: #ccc; font-size: 14px; }
@@ -212,6 +250,17 @@
   .orc-item-nome { font-size: 13px; font-weight: 700; }
   .orc-item-preco { font-size: 11px; color: #888; }
   .orc-item-qty { font-size: 13px; text-align: center; }
+  /* qtd editável direto na linha do orçamento */
+  .orc-qty-input {
+    width: 100%; max-width: 50px; text-align: center;
+    font-size: 13px; font-weight: 700; color: var(--ink);
+    border: 1.5px solid #e5d4b8; border-radius: 6px;
+    padding: 3px 2px; background: #fff; outline: none;
+    -moz-appearance: textfield; appearance: textfield;
+  }
+  .orc-qty-input::-webkit-outer-spin-button,
+  .orc-qty-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .orc-qty-input:focus { border-color: var(--brand); }
   .orc-item-total { font-size: 13px; font-weight: 700; text-align: right; }
   .orc-item-x { font-size: 16px; color: #bbb; cursor: pointer; text-align: center; line-height: 1; }
   .adicionar-link { font-size: 12px; font-weight: 700; color: #2563eb; text-decoration: underline; cursor: pointer; }
