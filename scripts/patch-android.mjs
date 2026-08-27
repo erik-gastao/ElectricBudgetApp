@@ -6,7 +6,7 @@
    no build.gradle precisa ser reaplicado por aqui, senão some.
 
    Faz três coisas:
-   1. Permissões (contatos, notificações, armazenamento) + package
+   1. Permissões (contatos, notificações, alarme exato, armazenamento) + package
       visibility (Android 11+), sem as quais `@capacitor-community/contacts`
       falha ao ler a agenda, o AppLauncher não abre o app de Contatos e o
       FileOpener não acha nenhum leitor de PDF.
@@ -40,6 +40,22 @@ const PERMISSOES = [
   'android.permission.READ_CONTACTS',
   'android.permission.WRITE_CONTACTS',
   'android.permission.POST_NOTIFICATIONS',
+
+  /* Alarme de 30 min antes do compromisso.
+     Do Android 12 (API 31) em diante, AlarmManager.canScheduleExactAlarms()
+     e' false sem uma destas duas — e o @capacitor/local-notifications entao
+     cai em setAndAllowWhileIdle, que o Doze pode segurar por minutos. Com
+     elas o plugin usa setExactAndAllowWhileIdle e o alarme sai na hora.
+
+     · SCHEDULE_EXACT_ALARM (12/12L): o usuario precisa conceder em
+       Ajustes > Alarmes e lembretes (o app abre essa tela sozinho).
+     · USE_EXACT_ALARM (13+): concedida na instalacao, sem prompt. A Play
+       Store so aceita essa em apps de alarme/agenda; a distribuicao aqui e'
+       APK direto, mas se um dia for pra Play e for recusada, basta remover
+       esta linha — o app continua funcionando com a de cima. */
+  'android.permission.SCHEDULE_EXACT_ALARM',
+  'android.permission.USE_EXACT_ALARM',
+  'android.permission.VIBRATE',
 ];
 
 /* Escrita na pasta pública Documentos. Da API 30 em diante o app já pode

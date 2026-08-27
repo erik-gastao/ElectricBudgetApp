@@ -309,7 +309,7 @@ function vencCancel() {
    depois que a gravação resolve (SPEC §7.1).
    ================================================================ */
 
-var clientes = [], materiais = [], agendamentos = [], pagamentos = [], orcamentos = [];
+var clientes = [], materiais = [], agendamentos = [], pagamentos = [], orcamentos = [], arquivos = [];
 var _dbOk = false;
 
 var ERRO_SALVAR = 'Não foi possível salvar. Verifique o espaço do aparelho.';
@@ -334,18 +334,10 @@ function persistDelete(store, id, cb) {
     .catch(function(e) { console.error('persistDelete', store, e); showToast(ERRO_SALVAR); });
 }
 
-/* ── SEED (dados-exemplo do protótipo, SPEC §4) ── */
-
-var SEED_CLIENTES = [
-  { nome: 'Carlos Mendonça',  telefone: '(55) 9 9812-3344', endereco: 'Rua Sete de Setembro, 278', bairro: 'Centro', cidade: 'Ijuí', obs: 'Prefere contato por WhatsApp. Portão azul.' },
-  { nome: 'Maria Aparecida',  telefone: '(55) 9 9701-5588', endereco: '', bairro: '', cidade: 'Ijuí', obs: '' },
-  { nome: 'Roberto Alves',    telefone: '(55) 9 9633-7721', endereco: '', bairro: '', cidade: 'Ijuí', obs: '' },
-  { nome: 'Fernanda Rocha',   telefone: '(55) 9 9455-0091', endereco: '', bairro: '', cidade: 'Ijuí', obs: '' },
-  { nome: 'João Paulo Souza', telefone: '(55) 9 9388-2267', endereco: '', bairro: '', cidade: 'Ijuí', obs: '' },
-  { nome: 'Ana Lima',         telefone: '(55) 9 9214-6630', endereco: '', bairro: '', cidade: 'Ijuí', obs: '' },
-  { nome: 'Pedro Costa',      telefone: '(55) 9 9960-1145', endereco: '', bairro: '', cidade: 'Ijuí', obs: '' },
-  { nome: 'Luciana Martins',  telefone: '(55) 9 9871-4409', endereco: '', bairro: '', cidade: 'Ijuí', obs: '' }
-];
+/* ── CATÁLOGO INICIAL DE MATERIAIS ──
+   Único seed que sobrou. Não é registro fictício: é uma lista de itens
+   de eletricista que o usuário edita/apaga à vontade. Clientes, agenda,
+   pagamentos e orçamentos nascem VAZIOS — nada de exemplo. */
 
 var SEED_MATERIAIS = [
   { nome: 'Fio 2,5mm² Flexível',     unit: 'metro',   preco: 4.90,  cat: 'FIOS' },
@@ -357,80 +349,138 @@ var SEED_MATERIAIS = [
   { nome: 'Caixa de Passagem 4x4',   unit: 'unidade', preco: 5.60,  cat: 'OUTROS' }
 ];
 
-var SEED_AGENDAMENTOS = [
-  { data: '2026-06-30', hora: '08:00', desc: 'Instalação de quadro elétrico', cliente: 'Carlos Mendonça', obs: '' },
-  { data: '2026-06-30', hora: '14:00', desc: 'Vistoria pós-reforma',          cliente: 'Roberto Alves',   obs: '' },
-  { data: '2026-07-01', hora: '09:30', desc: 'Revisão geral – 3 cômodos',     cliente: 'Maria Aparecida', obs: '' },
-  { data: '2026-07-01', hora: '16:00', desc: 'Instalação de tomadas',         cliente: 'Fernanda Rocha',  obs: '' }
-];
-
-/* Statuses do protótipo migrados pro modelo alvo (SPEC §4/§8.1):
-   'atrasado' vira pendente com vencimento no passado (deriva no render);
-   'aprovado' era vocabulário de orçamento — vira pendente. */
-var SEED_PAGAMENTOS = [
-  { clienteNome: 'Carlos Mendonça', servico: 'Instalação de quadro elétrico',      valor: 580.00,  status: 'pendente', forma: 'PIX',    dataVencimento: '2026-06-26', dataPagamento: null },
-  { clienteNome: 'Roberto Alves',   servico: 'Rede elétrica – galpão',             valor: 1320.00, status: 'pendente', forma: 'BOLETO', dataVencimento: '2026-06-10', dataPagamento: null },
-  { clienteNome: 'Maria Aparecida', servico: 'Revisão geral – 3 cômodos',          valor: 270.00,  status: 'pago',     forma: 'PIX',    dataVencimento: '2026-06-20', dataPagamento: '2026-06-20' },
-  { clienteNome: 'Fernanda Rocha',  servico: 'Instalação de tomadas – escritório', valor: 390.00,  status: 'pendente', forma: 'CARTÃO', dataVencimento: '2026-06-28', dataPagamento: null }
-];
-
 function _comId(base) { return Object.assign({ id: novoId() }, base); }
+
+/* ── LIMPEZA DOS DADOS DE EXEMPLO ──
+   Apagar o seed do código não limpa quem JÁ abriu o app: os registros
+   fictícios estão no IndexedDB do aparelho. A remoção roda uma vez no
+   boot casando cada registro pela assinatura EXATA do antigo seed — se
+   o usuário editou o registro, a assinatura não bate e nada é tocado. */
+
+var DEMO_CLIENTES = [
+  ['Carlos Mendonça',  '(55) 9 9812-3344'],
+  ['Maria Aparecida',  '(55) 9 9701-5588'],
+  ['Roberto Alves',    '(55) 9 9633-7721'],
+  ['Fernanda Rocha',   '(55) 9 9455-0091'],
+  ['João Paulo Souza', '(55) 9 9388-2267'],
+  ['Ana Lima',         '(55) 9 9214-6630'],
+  ['Pedro Costa',      '(55) 9 9960-1145'],
+  ['Luciana Martins',  '(55) 9 9871-4409']
+];
+
+var DEMO_AGENDAMENTOS = [
+  ['2026-06-30', '08:00', 'Instalação de quadro elétrico', 'Carlos Mendonça'],
+  ['2026-06-30', '14:00', 'Vistoria pós-reforma',          'Roberto Alves'],
+  ['2026-07-01', '09:30', 'Revisão geral – 3 cômodos',     'Maria Aparecida'],
+  ['2026-07-01', '16:00', 'Instalação de tomadas',         'Fernanda Rocha']
+];
+
+var DEMO_PAGAMENTOS = [
+  ['Instalação de quadro elétrico',      580.00,  '2026-06-26'],
+  ['Rede elétrica – galpão',             1320.00, '2026-06-10'],
+  ['Revisão geral – 3 cômodos',          270.00,  '2026-06-20'],
+  ['Instalação de tomadas – escritório', 390.00,  '2026-06-28']
+];
+
+function _bateAssinatura(listas, valores) {
+  for (var i = 0; i < listas.length; i++) {
+    var ok = true;
+    for (var j = 0; j < valores.length; j++) {
+      if (String(listas[i][j]) !== String(valores[j])) { ok = false; break; }
+    }
+    if (ok) return true;
+  }
+  return false;
+}
+
+function _ehClienteDemo(c) {
+  return !!c && _bateAssinatura(DEMO_CLIENTES, [c.nome, c.telefone]);
+}
+function _ehAgendamentoDemo(a) {
+  return !!a && _bateAssinatura(DEMO_AGENDAMENTOS, [a.data, a.hora, a.desc, a.cliente]);
+}
+function _ehPagamentoDemo(p) {
+  return !!p && !p.orcamentoId
+    && _bateAssinatura(DEMO_PAGAMENTOS, [p.servico, p.valor, p.dataVencimento]);
+}
+
+/* Monta a lista de exclusões a partir do que está no banco.
+   Retorna [{ store, key }] pronto pro dbDeleteMany. */
+function _alvosDemo(dados) {
+  var alvos = [];
+  dados.clientes.forEach(function(c) { if (_ehClienteDemo(c)) alvos.push({ store: 'clientes', key: c.id }); });
+  dados.agendamentos.forEach(function(a) { if (_ehAgendamentoDemo(a)) alvos.push({ store: 'agendamentos', key: a.id }); });
+  dados.pagamentos.forEach(function(p) { if (_ehPagamentoDemo(p)) alvos.push({ store: 'pagamentos', key: p.id }); });
+  return alvos;
+}
+
+var DEMO_PREF_KEY = 'demo-limpo';
+
+/* one-shot no boot — silencioso, roda antes do primeiro render */
+function limparDadosExemploUmaVez() {
+  if (!_dbOk) return Promise.resolve(0);
+  return dbGet('preferencias', DEMO_PREF_KEY).then(function(pref) {
+    if (pref && pref.value) return 0;
+    return _removerDemo().then(function(n) {
+      return dbPut('preferencias', { key: DEMO_PREF_KEY, value: 1 }).then(function() { return n; });
+    });
+  }).catch(function(e) { diag('demo: limpeza falhou →', e); return 0; });
+}
+
+function _removerDemo() {
+  return Promise.all([dbAll('clientes'), dbAll('agendamentos'), dbAll('pagamentos')])
+    .then(function(r) {
+      var alvos = _alvosDemo({ clientes: r[0], agendamentos: r[1], pagamentos: r[2] });
+      if (alvos.length === 0) return 0;
+      return dbDeleteMany(alvos).then(function() {
+        diag('demo: ' + alvos.length + ' registro(s) de exemplo removidos');
+        return alvos.length;
+      });
+    });
+}
+
+/* botão no perfil — reexecuta mesmo com a flag já marcada */
+function limparDadosExemplo() {
+  if (!_dbOk) { showToast('Armazenamento indisponível.'); return; }
+  showConfirm('Remover os clientes, compromissos e pagamentos de exemplo que vieram com o app?', function() {
+    _removerDemo().then(function(n) {
+      if (n === 0) { showToast('Nenhum dado de exemplo encontrado.'); return; }
+      return loadAll().then(function() {
+        refreshPickerBotoes();
+        renderHomeAgenda(); renderHomeOrcamentos(); renderPayHome(); atualizarBadgeSino();
+        showToast(n + ' registro(s) de exemplo removidos.');
+      });
+    }).catch(function(e) {
+      console.error('limparDemo', e);
+      showToast('Não foi possível remover os dados de exemplo.');
+    });
+  });
+}
 
 /* Seed idempotente: só semeia store vazio (SPEC §4.2) */
 function seedIfEmpty() {
-  return dbCount('clientes').then(function(n) {
-    if (n === 0) {
-      var cls = SEED_CLIENTES.map(_comId);
-      return Promise.all(cls.map(function(c) { return dbPut('clientes', c); })).then(function() { return cls; });
-    }
-    return dbAll('clientes');
-  }).then(function(cls) {
-    var idPorNome = {};
-    cls.forEach(function(c) { idPorNome[c.nome] = c.id; });
-    return dbCount('materiais').then(function(n) {
-      if (n === 0) return Promise.all(SEED_MATERIAIS.map(function(m) { return dbPut('materiais', _comId(m)); }));
-    }).then(function() {
-      return dbCount('agendamentos');
-    }).then(function(n) {
-      if (n === 0) return Promise.all(SEED_AGENDAMENTOS.map(function(a) { return dbPut('agendamentos', _comId(a)); }));
-    }).then(function() {
-      return dbCount('pagamentos');
-    }).then(function(n) {
-      if (n === 0) return Promise.all(SEED_PAGAMENTOS.map(function(p) {
-        var o = _comId(p);
-        o.clienteId = idPorNome[p.clienteNome] || null;
-        o.orcamentoId = null;
-        delete o.clienteNome;
-        return dbPut('pagamentos', o);
-      }));
-    });
+  return dbCount('materiais').then(function(n) {
+    if (n === 0) return Promise.all(SEED_MATERIAIS.map(function(m) { return dbPut('materiais', _comId(m)); }));
   });
 }
 
 /* Degradação sem IndexedDB: app roda em memória e avisa (SPEC §7.1) */
 function seedMemory() {
-  clientes = SEED_CLIENTES.map(_comId);
-  var idPorNome = {};
-  clientes.forEach(function(c) { idPorNome[c.nome] = c.id; });
+  clientes = [];
   materiais = SEED_MATERIAIS.map(_comId);
-  agendamentos = SEED_AGENDAMENTOS.map(_comId);
-  pagamentos = SEED_PAGAMENTOS.map(function(p) {
-    var o = _comId(p);
-    o.clienteId = idPorNome[p.clienteNome] || null;
-    o.orcamentoId = null;
-    delete o.clienteNome;
-    return o;
-  });
+  agendamentos = [];
+  pagamentos = [];
   orcamentos = [];
+  arquivos = [];
 }
 
 function loadAll() {
   return Promise.all([
     dbAll('clientes'), dbAll('materiais'), dbAll('orcamentos'),
-    dbAll('agendamentos'), dbAll('pagamentos')
+    dbAll('agendamentos'), dbAll('pagamentos'), dbAll('arquivos')
   ]).then(function(r) {
     clientes = r[0]; materiais = r[1]; orcamentos = r[2];
-    agendamentos = r[3]; pagamentos = r[4];
+    agendamentos = r[3]; pagamentos = r[4]; arquivos = r[5];
   });
 }
 
@@ -454,10 +504,59 @@ function clientePorNome(nome) {
    PAGAMENTOS
    ================================================================ */
 
+/* ── RECEBIMENTOS PARCIAIS ──
+   Um pagamento tem `valor` (o combinado) e uma lista `recebimentos`
+   [{ id, valor, data, forma }]. Recebido = soma da lista; saldo = valor −
+   recebido; quitado quando o saldo zera. `p.status`/`p.dataPagamento`
+   continuam existindo e são mantidos em sincronia, porque recibo,
+   relatório e backup antigos leem esses campos.
+
+   Registro anterior aos parciais não tem a lista: 'pago' vale como um
+   recebimento cheio na data de pagamento. */
+
+var EPS = 0.004;   /* tolerância de centavo nas comparações de saldo */
+
+function recebimentosDe(p) {
+  if (!p) return [];
+  if (Array.isArray(p.recebimentos) && p.recebimentos.length) return p.recebimentos;
+  if (p.status === 'pago') {
+    return [{ id: p.id, valor: p.valor, data: p.dataPagamento || hojeLocal(), forma: p.forma || null }];
+  }
+  return [];
+}
+
+function totalRecebido(p) {
+  return round2(recebimentosDe(p).reduce(function(s, r) { return s + (Number(r.valor) || 0); }, 0));
+}
+
+function saldoPagamento(p) {
+  return round2((Number(p && p.valor) || 0) - totalRecebido(p));
+}
+
+function ehParcial(p) {
+  return totalRecebido(p) > EPS && saldoPagamento(p) > EPS;
+}
+
 /* 'atrasado' derivado no render — nunca salvo (SPEC §8.1) */
 function statusPagamento(p) {
-  if (p.status === 'pago') return 'pago';
+  if (saldoPagamento(p) <= EPS) return 'pago';
   return (p.dataVencimento && p.dataVencimento < hojeLocal()) ? 'atrasado' : 'pendente';
+}
+
+/* mantém os campos legados coerentes com a lista de recebimentos */
+function sincronizarStatusPagamento(p) {
+  var recs = Array.isArray(p.recebimentos) ? p.recebimentos : [];
+  if (saldoPagamento(p) <= EPS) {
+    p.status = 'pago';
+    p.dataPagamento = recs.length
+      ? recs.map(function(r) { return r.data; }).sort().pop()
+      : (p.dataPagamento || hojeLocal());
+    if (!p.forma && recs.length) p.forma = recs[recs.length - 1].forma || p.forma;
+  } else {
+    p.status = 'pendente';
+    p.dataPagamento = null;
+  }
+  return p;
 }
 
 var _lblPag = { pendente: 'COBRAR AGORA', atrasado: 'ENVIAR AVISO', pago: 'VER RECIBO' };
@@ -472,6 +571,7 @@ function renderPagamentos() {
   var items = pagamentos.filter(function(p) {
     if (filtro === 'TODOS') return true;
     if (filtro === 'ESTE MÊS') return (p.dataVencimento || '').indexOf(mesAtualPrefixo()) === 0;
+    if (filtro === 'PARCIAL') return ehParcial(p);
     return statusPagamento(p) === filtro.toLowerCase();
   });
 
@@ -482,19 +582,59 @@ function renderPagamentos() {
 
   list.innerHTML = items.map(function(p) {
     var st = statusPagamento(p);
+    var recebido = totalRecebido(p);
+    var saldo = saldoPagamento(p);
+    var parcial = ehParcial(p);
     var btnCls = 'pay-action-btn' + (_btnPag[st] ? ' ' + _btnPag[st] : '');
+
+    var badges = '<span class="status-badge ' + st + '">' + st.toUpperCase() + '</span>';
+    if (parcial) badges = '<span class="status-badge parcial">PARCIAL</span>' + badges;
+
+    /* barra + linha de saldo só aparecem quando há algo recebido em aberto */
+    var progresso = '';
+    if (recebido > EPS) {
+      var pct = Math.min(100, Math.round(recebido / (p.valor || 1) * 100));
+      progresso = '<div class="pay-progress" aria-hidden="true"><div class="pay-progress-fill" style="width:' + pct + '%"></div></div>'
+        + '<div class="pay-saldo-row">'
+        +   '<span class="pay-saldo-ok">Recebido ' + fmtBR(recebido) + '</span>'
+        +   (saldo > EPS ? '<span class="pay-saldo-falta">Falta ' + fmtBR(saldo) + '</span>' : '<span class="pay-saldo-ok">Quitado</span>')
+        + '</div>';
+    }
+
+    var historico = '';
+    var recs = Array.isArray(p.recebimentos) ? p.recebimentos : [];
+    if (recs.length) {
+      historico = '<div class="pay-recs">' + recs.map(function(r) {
+        return '<div class="pay-rec-linha">'
+          + '<span>' + String(r.data || '').split('-').reverse().join('/')
+          + (r.forma ? ' · ' + esc(r.forma) : '') + '</span>'
+          + '<span>' + fmtBR(r.valor) + '</span></div>';
+      }).join('') + '</div>';
+    }
+
     var botoes;
     if (st === 'pago') {
       botoes = '<button class="' + btnCls + '" onclick="verRecibo(\'' + p.id + '\')">' + _lblPag[st] + '</button>';
+      if (recs.length) {
+        botoes += '<button class="pay-action-btn desfazer" onclick="desfazerRecebimento(\'' + p.id + '\')">DESFAZER ÚLTIMO</button>';
+      }
     } else {
       botoes = '<button class="' + btnCls + '" onclick="cobrarPagamento(\'' + p.id + '\')">' + _lblPag[st] + '</button>'
-        + '<button class="pay-action-btn marcar-pago" onclick="marcarPago(\'' + p.id + '\')">MARCAR PAGO</button>';
+        + '<button class="pay-action-btn receber" onclick="abrirReceber(\'' + p.id + '\')">REGISTRAR RECEBIMENTO</button>'
+        + '<button class="pay-action-btn marcar-pago" onclick="marcarPago(\'' + p.id + '\')">QUITAR ' + fmtBR(saldo) + '</button>';
+      if (recebido > EPS) {
+        botoes += '<button class="pay-action-btn recibo-parcial" onclick="verRecibo(\'' + p.id + '\')">RECIBO PARCIAL</button>'
+          + '<button class="pay-action-btn desfazer" onclick="desfazerRecebimento(\'' + p.id + '\')">DESFAZER ÚLTIMO</button>';
+      }
     }
+
     return '<div class="pay-item-card">'
       + '<div class="pay-item-top"><span class="pay-item-name">' + esc(clienteNome(p.clienteId)) + '</span>'
-      + '<span class="status-badge ' + st + '">' + st.toUpperCase() + '</span></div>'
+      + badges + '</div>'
       + '<div class="pay-item-servico">' + esc(p.servico) + '</div>'
       + '<div class="pay-item-valor">' + fmtBR(p.valor) + '</div>'
+      + progresso
+      + historico
       + botoes
       + '</div>';
   }).join('');
@@ -508,12 +648,20 @@ function renderPaySummary() {
 
   var semana = 0, mes = 0;
   pagamentos.forEach(function(p) {
-    if (p.status !== 'pago' || !p.dataPagamento) return;
-    if (p.dataPagamento >= seteAtras && p.dataPagamento <= hoje) semana += p.valor;
-    if (p.dataPagamento.indexOf(mesAtualPrefixo()) === 0) mes += p.valor;
+    recebimentosDe(p).forEach(function(r) {
+      if (!r.data) return;
+      if (r.data >= seteAtras && r.data <= hoje) semana += Number(r.valor) || 0;
+      if (r.data.indexOf(mesAtualPrefixo()) === 0) mes += Number(r.valor) || 0;
+    });
   });
   var e1 = document.getElementById('pay-sum-semana'); if (e1) e1.textContent = fmtBR(semana);
   var e2 = document.getElementById('pay-sum-mes');    if (e2) e2.textContent = fmtBR(mes);
+
+  var aberto = pagamentos.reduce(function(s, p) {
+    var sd = saldoPagamento(p);
+    return s + (sd > EPS ? sd : 0);
+  }, 0);
+  var e3 = document.getElementById('pay-sum-aberto'); if (e3) e3.textContent = fmtBR(aberto);
 }
 
 function filterPagamentos(el) {
@@ -558,7 +706,10 @@ function salvarPagamento() {
     status: status,
     forma: formaEl ? formaEl.textContent : 'PIX',
     dataVencimento: data,
-    dataPagamento: status === 'pago' ? hojeLocal() : null
+    dataPagamento: status === 'pago' ? hojeLocal() : null,
+    recebimentos: status === 'pago'
+      ? [{ id: novoId(), valor: valor, data: hojeLocal(), forma: formaEl ? formaEl.textContent : 'PIX' }]
+      : []
   };
 
   pagamentos.unshift(pag);
@@ -581,20 +732,142 @@ function pagamentoById(id) {
   return null;
 }
 
-/* Baixa real — MARCAR PAGO (SPEC §8.1) */
+/* ── BAIXA (total ou parcial) ──
+   Toda baixa vira um item em p.recebimentos; quitar é só um recebimento
+   do saldo inteiro. Assim "recebi 500 de 1100, faltam 600" e "recebi
+   tudo" percorrem o mesmo caminho e o histórico nunca some. */
+
+function aplicarRecebimento(p, valor, data, forma, aoTerminar) {
+  if (!Array.isArray(p.recebimentos)) {
+    /* migra o registro legado: 'pago' antigo vira o primeiro recebimento */
+    p.recebimentos = (p.status === 'pago')
+      ? [{ id: novoId(), valor: round2(p.valor), data: p.dataPagamento || hojeLocal(), forma: p.forma || null }]
+      : [];
+  }
+  p.recebimentos.push({ id: novoId(), valor: round2(valor), data: data, forma: forma || null });
+  sincronizarStatusPagamento(p);
+  persistPut('pagamentos', p, function() {
+    var saldo = saldoPagamento(p);
+    showToast(saldo > EPS
+      ? 'Recebido ' + fmtBR(valor) + ' · faltam ' + fmtBR(saldo)
+      : 'Pagamento quitado!');
+    renderPagamentos(); renderPaySummary(); renderPayHome(); atualizarBadgeSino();
+    if (aoTerminar) aoTerminar();
+  });
+}
+
+/* QUITAR — baixa o saldo restante de uma vez (SPEC §8.1) */
 function marcarPago(id) {
   var p = pagamentoById(id);
   if (!p) return;
-  showConfirm('Confirmar recebimento de ' + fmtBR(p.valor) + ' de ' + clienteNome(p.clienteId) + '?', function() {
-    p.status = 'pago';
-    p.dataPagamento = hojeLocal();
+  var saldo = saldoPagamento(p);
+  if (saldo <= EPS) return;
+  showConfirm('Confirmar recebimento de ' + fmtBR(saldo) + ' de ' + clienteNome(p.clienteId) + '?', function() {
     /* não fabrica forma: se veio de orçamento aprovado forma é null,
        e o recibo apenas omite o método em vez de mentir 'PIX' */
+    aplicarRecebimento(p, saldo, hojeLocal(), p.forma || null);
+  });
+}
+
+/* Desfaz o último recebimento — erro de digitação é o caso comum */
+function desfazerRecebimento(id) {
+  var p = pagamentoById(id);
+  if (!p) return;
+  if (!Array.isArray(p.recebimentos) || p.recebimentos.length === 0) {
+    /* pago no modelo antigo: desfazer devolve o pagamento a pendente */
+    if (p.status !== 'pago') return;
+    showConfirm('Desfazer a baixa de ' + fmtBR(p.valor) + '?', function() {
+      p.recebimentos = [];
+      sincronizarStatusPagamento(p);
+      persistPut('pagamentos', p, function() {
+        showToast('Baixa desfeita.');
+        renderPagamentos(); renderPaySummary(); renderPayHome(); atualizarBadgeSino();
+      });
+    });
+    return;
+  }
+  var ultimo = p.recebimentos[p.recebimentos.length - 1];
+  showConfirm('Desfazer o recebimento de ' + fmtBR(ultimo.valor) + ' em '
+    + String(ultimo.data || '').split('-').reverse().join('/') + '?', function() {
+    p.recebimentos.pop();
+    sincronizarStatusPagamento(p);
     persistPut('pagamentos', p, function() {
-      showToast('Pagamento recebido!');
-      renderPagamentos(); renderPaySummary();
+      showToast('Recebimento desfeito.');
+      renderPagamentos(); renderPaySummary(); renderPayHome(); atualizarBadgeSino();
     });
   });
+}
+
+/* ── MODAL DE RECEBIMENTO PARCIAL ── */
+
+var _recebeId = null;
+
+function abrirReceber(id) {
+  var p = pagamentoById(id);
+  if (!p) return;
+  var modal = document.getElementById('receber-modal');
+  if (!modal) { marcarPago(id); return; }
+  _recebeId = id;
+
+  var saldo = saldoPagamento(p);
+  document.getElementById('receber-resumo').innerHTML =
+    '<div class="receber-linha"><span>' + esc(clienteNome(p.clienteId)) + '</span><span></span></div>'
+    + '<div class="receber-linha"><span>Total combinado</span><span>' + fmtBR(p.valor) + '</span></div>'
+    + '<div class="receber-linha"><span>Já recebido</span><span>' + fmtBR(totalRecebido(p)) + '</span></div>'
+    + '<div class="receber-linha destaque"><span>Falta</span><span>' + fmtBR(saldo) + '</span></div>';
+
+  document.getElementById('receber-valor').value = numeroParaMoeda(saldo);
+  document.getElementById('receber-data').value = hojeLocal();
+  document.getElementById('receber-erro').style.display = 'none';
+
+  /* pré-seleciona a forma que o pagamento já tem, se houver */
+  var chips = document.querySelectorAll('#receber-forma-row .filter-chip');
+  var achou = false;
+  chips.forEach(function(c) {
+    var on = !!p.forma && c.textContent === p.forma;
+    c.classList.toggle('active', on);
+    if (on) achou = true;
+  });
+  if (!achou && chips.length) chips[0].classList.add('active');
+
+  modal.classList.add('show');
+}
+
+function selectFormaReceber(el) {
+  document.querySelectorAll('#receber-forma-row .filter-chip').forEach(function(c) { c.classList.remove('active'); });
+  el.classList.add('active');
+}
+
+function receberOk() {
+  var p = pagamentoById(_recebeId);
+  var erro = document.getElementById('receber-erro');
+  if (!p) { receberCancel(); return; }
+
+  var bruto = document.getElementById('receber-valor').value;
+  var valor = moedaParaNumero(bruto);
+  var data = document.getElementById('receber-data').value;
+  var formaEl = document.querySelector('#receber-forma-row .filter-chip.active');
+
+  if (!bruto || isNaN(valor) || valor <= 0) {
+    erro.textContent = 'Informe um valor válido.'; erro.style.display = 'block'; return;
+  }
+  if (valor - saldoPagamento(p) > EPS) {
+    erro.textContent = 'Valor maior que o saldo em aberto (' + fmtBR(saldoPagamento(p)) + ').';
+    erro.style.display = 'block'; return;
+  }
+  if (!data) { erro.textContent = 'Informe a data do recebimento.'; erro.style.display = 'block'; return; }
+  erro.style.display = 'none';
+
+  var forma = formaEl ? formaEl.textContent : null;
+  var id = _recebeId;
+  receberCancel();
+  aplicarRecebimento(pagamentoById(id), valor, data, forma);
+}
+
+function receberCancel() {
+  _recebeId = null;
+  var m = document.getElementById('receber-modal');
+  if (m) m.classList.remove('show');
 }
 
 /* COBRAR não muda status — só avisa o cliente via WhatsApp (SPEC §8.1) */
@@ -618,10 +891,16 @@ function cobrarPagamento(id) {
   var parts = (p.dataVencimento || '').split('-');
   var vencFmt = parts.length === 3 ? parts[2] + '/' + parts[1] + '/' + parts[0] : '';
   var atrasado = statusPagamento(p) === 'atrasado';
+  var saldo = saldoPagamento(p);
+  /* num parcial cobrar o valor cheio soa como se o que já entrou tivesse
+     sumido — a mensagem cobra o saldo e credita o que foi pago */
+  var detalheParcial = ehParcial(p)
+    ? ' (de ' + fmtBR(p.valor) + ', já recebi ' + fmtBR(totalRecebido(p)) + ')'
+    : '';
   var msg = 'Olá, ' + (c.nome.split(' ')[0]) + '! '
     + (atrasado
-        ? 'Passando para lembrar do pagamento de ' + fmtBR(p.valor) + ' referente a "' + p.servico + '", vencido em ' + vencFmt + '. '
-        : 'Segue a cobrança de ' + fmtBR(p.valor) + ' referente a "' + p.servico + '", com vencimento em ' + vencFmt + '. ')
+        ? 'Passando para lembrar do pagamento de ' + fmtBR(saldo) + detalheParcial + ' referente a "' + p.servico + '", vencido em ' + vencFmt + '. '
+        : 'Segue a cobrança de ' + fmtBR(saldo) + detalheParcial + ' referente a "' + p.servico + '", com vencimento em ' + vencFmt + '. ')
     + 'Qualquer dúvida estou à disposição. Obrigado!';
   window.open('https://wa.me/' + fone + '?text=' + encodeURIComponent(msg), '_blank');
 }
@@ -632,7 +911,10 @@ function cobrarPagamento(id) {
    blob: não é URL que outro app consiga abrir — por isso o PDF "não
    salvava nem abria" no APK. No nativo o arquivo vai pro disco pelo
    Filesystem e é aberto pelo FileOpener (FileProvider), com Share como
-   plano B. */
+   plano B.
+
+   Antes de gravar, o usuário confere/edita o nome do arquivo; o que for
+   gravado fica registrado no store 'arquivos' e aparece na aba PDFs. */
 
 function pluginFilesystem() {
   return (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem) || null;
@@ -644,15 +926,104 @@ function pluginShare() {
   return (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Share) || null;
 }
 
-function entregarPdf(doc, nomeArq, label) {
-  if (capNativo() && pluginFilesystem()) { entregarPdfNativo(doc, nomeArq, label); return; }
-  if (capNativo()) {
-    diag('pdf: nativo sem plugin Filesystem — usando fallback web. Plugins: ' + diagPlugins());
-  }
-  entregarPdfWeb(doc, nomeArq, label);
+/* ── NOME DO ARQUIVO ──
+   Tira o que Android/FAT não aceitam em nome de arquivo. Sem isso uma
+   barra vinda do nome do cliente vira "subpasta" e a escrita falha. */
+function sanitizarNomeArq(nome) {
+  var n = String(nome || '')
+    .replace(/\.pdf$/i, '')
+    .replace(/[\\/:*?"<>|]/g, ' ')
+    .replace(/[ -]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s.]+/, '')
+    .replace(/[\s.]+$/, '');
+  return n.slice(0, 60);
 }
 
-function entregarPdfWeb(doc, nomeArq, label) {
+var _arqNomeCb = null;
+
+function showNomeArqModal(nomeSugerido, cb) {
+  var inp = document.getElementById('arq-nome-input');
+  var modal = document.getElementById('arq-nome-modal');
+  if (!inp || !modal) { cb(sanitizarNomeArq(nomeSugerido) + '.pdf'); return; }
+  _arqNomeCb = cb;
+  inp.value = sanitizarNomeArq(nomeSugerido);
+  document.getElementById('arq-nome-erro').style.display = 'none';
+  modal.classList.add('show');
+  setTimeout(function() { try { inp.focus(); inp.select(); } catch (e) {} }, 60);
+}
+
+function arqNomeOk() {
+  var limpo = sanitizarNomeArq((document.getElementById('arq-nome-input') || {}).value);
+  var erro = document.getElementById('arq-nome-erro');
+  if (!limpo) {
+    erro.textContent = 'Informe um nome válido para o arquivo.';
+    erro.style.display = 'block';
+    return;
+  }
+  var cb = _arqNomeCb; _arqNomeCb = null;
+  document.getElementById('arq-nome-modal').classList.remove('show');
+  if (cb) cb(limpo + '.pdf');
+}
+
+function arqNomeCancel() {
+  _arqNomeCb = null;
+  var m = document.getElementById('arq-nome-modal');
+  if (m) m.classList.remove('show');
+}
+
+/* ── REGISTRO DOS PDFs GERADOS (aba PDFs) ──
+   Guarda só metadado — o binário fica no disco do aparelho. */
+
+function registrarArquivo(meta) {
+  var anterior = null;
+  for (var i = 0; i < arquivos.length; i++) {
+    /* mesmo documento salvo com o mesmo nome → atualiza, não duplica */
+    if (arquivos[i].nome === meta.nome && arquivos[i].refId === (meta.refId || null)) {
+      anterior = arquivos[i];
+      break;
+    }
+  }
+  var reg = {
+    id: anterior ? anterior.id : novoId(),
+    nome: meta.nome,
+    tipo: meta.tipo || 'documento',
+    refId: meta.refId || null,
+    label: meta.label || 'o arquivo',
+    titulo: meta.titulo || meta.nome,
+    uri: meta.uri || null,
+    dir: meta.dir || null,
+    criadoEm: new Date().toISOString()
+  };
+  if (anterior) arquivos.splice(arquivos.indexOf(anterior), 1);
+  arquivos.unshift(reg);
+  if (_dbOk) dbPut('arquivos', reg).catch(function(e) { diag('arquivos: falha ao registrar', e); });
+  return reg;
+}
+
+function arquivoById(id) {
+  for (var i = 0; i < arquivos.length; i++) if (arquivos[i].id === id) return arquivos[i];
+  return null;
+}
+
+/* meta: { tipo, refId, titulo } — usado pra registrar e pra regerar depois.
+   meta.semPerguntar pula o modal do nome (regeração a partir da aba PDFs). */
+function entregarPdf(doc, nomeArq, label, meta) {
+  meta = meta || {};
+  var seguir = function(nomeFinal) {
+    var m = Object.assign({}, meta, { nome: nomeFinal, label: label });
+    if (capNativo() && pluginFilesystem()) { entregarPdfNativo(doc, nomeFinal, label, m); return; }
+    if (capNativo()) {
+      diag('pdf: nativo sem plugin Filesystem — usando fallback web. Plugins: ' + diagPlugins());
+    }
+    entregarPdfWeb(doc, nomeFinal, label, m);
+  };
+  if (meta.semPerguntar) { seguir(sanitizarNomeArq(nomeArq) + '.pdf'); return; }
+  showNomeArqModal(nomeArq, seguir);
+}
+
+function entregarPdfWeb(doc, nomeArq, label, meta) {
+  registrarArquivo(Object.assign({}, meta || {}, { uri: null, dir: null }));
   function baixar() {
     try { doc.save(nomeArq); } catch (e) { showToast('Falha ao salvar PDF.'); }
   }
@@ -693,12 +1064,12 @@ function _gravarPdfEm(FS, dirs, i, nomeArq, base64) {
   return FS.writeFile({ path: nomeArq, data: base64, directory: dirs[i], recursive: true })
     .then(function(r) { return { uri: r && r.uri, dir: dirs[i] }; })
     .catch(function(e) {
-      diag('pdf: escrita em ' + dirs[i] + ' falhou →', e);
+      diag('pdf: escrita em ' + dirs[i] + ' falhou', e);
       return _gravarPdfEm(FS, dirs, i + 1, nomeArq, base64);
     });
 }
 
-function entregarPdfNativo(doc, nomeArq, label) {
+function entregarPdfNativo(doc, nomeArq, label, meta) {
   var FS = pluginFilesystem();
   var base64;
   try {
@@ -706,22 +1077,23 @@ function entregarPdfNativo(doc, nomeArq, label) {
        Filesystem quer só o payload depois da vírgula. */
     base64 = String(doc.output('datauristring')).split(',')[1];
   } catch (e) {
-    diag('pdf: falha ao serializar →', e);
+    diag('pdf: falha ao serializar', e);
     showToast('Falha ao gerar o PDF.');
     return;
   }
   if (!base64) { showToast('Falha ao gerar o PDF.'); return; }
 
-  diag('pdf: gravando ' + nomeArq + ' (' + Math.round(base64.length * 0.75 / 1024) + ' KB)…');
+  diag('pdf: gravando ' + nomeArq + ' (' + Math.round(base64.length * 0.75 / 1024) + ' KB)');
 
   _gravarPdfEm(FS, _PDF_DIRS, 0, nomeArq, base64).then(function(r) {
-    diag('pdf: gravado em ' + r.dir + ' → ' + r.uri);
+    diag('pdf: gravado em ' + r.dir + ' -> ' + r.uri);
+    registrarArquivo(Object.assign({}, meta || {}, { uri: r.uri, dir: r.dir }));
     var onde = _PDF_DIR_LABEL[r.dir] || 'no aparelho';
-    showConfirm('PDF salvo ' + onde + '. Abrir ' + label + ' agora?',
+    showConfirm('PDF salvo ' + onde + ' como "' + nomeArq + '". Abrir ' + label + ' agora?',
       function() { abrirPdfNativo(r.uri, nomeArq, label); },
       function() { showToast('PDF salvo: ' + nomeArq); });
   }).catch(function(e) {
-    diag('pdf: NÃO foi possível gravar →', e);
+    diag('pdf: NÃO foi possível gravar', e);
     showToast('Não foi possível salvar o PDF no aparelho.');
   });
 }
@@ -734,7 +1106,7 @@ function abrirPdfNativo(uri, nomeArq, label) {
     if (!SH) { showToast('PDF salvo: ' + nomeArq + '. Abra pelo gerenciador de arquivos.'); return; }
     SH.share({ title: nomeArq, url: uri, dialogTitle: 'Abrir ou enviar ' + label })
       .catch(function(e) {
-        diag('pdf: Share falhou →', e);
+        diag('pdf: Share falhou', e);
         showToast('PDF salvo: ' + nomeArq + '. Abra pelo gerenciador de arquivos.');
       });
   };
@@ -743,15 +1115,131 @@ function abrirPdfNativo(uri, nomeArq, label) {
     .then(function() { diag('pdf: aberto pelo FileOpener'); })
     .catch(function(e) {
       /* sem leitor de PDF instalado, ou o Intent foi recusado */
-      diag('pdf: FileOpener falhou →', e);
+      diag('pdf: FileOpener falhou', e);
       compartilhar('FileOpener recusou');
     });
 }
 
+/* ================================================================
+   ABA PDFs — biblioteca dos documentos gerados
+   ================================================================ */
+
+var _ARQ_BADGE = { orcamento: 'ORÇAMENTO', recibo: 'RECIBO', documento: 'PDF' };
+
+function filterArquivos(el) {
+  document.querySelectorAll('#screen-arquivos .filter-chip').forEach(function(c) { c.classList.remove('active'); });
+  el.classList.add('active');
+  renderArquivos();
+}
+
+function renderArquivos() {
+  var list = document.getElementById('arq-list');
+  if (!list) return;
+  var chip = document.querySelector('#screen-arquivos .filter-chip.active');
+  var filtro = chip ? chip.textContent : 'TODOS';
+
+  var itens = arquivos.filter(function(a) {
+    if (filtro === 'ORÇAMENTOS') return a.tipo === 'orcamento';
+    if (filtro === 'RECIBOS') return a.tipo === 'recibo';
+    return true;
+  }).slice().sort(function(a, b) { return String(b.criadoEm || '').localeCompare(String(a.criadoEm || '')); });
+
+  var cnt = document.getElementById('arq-count');
+  if (cnt) cnt.textContent = itens.length + (itens.length === 1 ? ' ARQUIVO' : ' ARQUIVOS');
+
+  if (itens.length === 0) {
+    list.innerHTML = '<div class="empty-state">Nenhum PDF gerado ainda.<br/>'
+      + 'Os orçamentos e recibos que você salvar aparecem aqui.</div>';
+    return;
+  }
+
+  list.innerHTML = itens.map(function(a) {
+    var quando = String(a.criadoEm || '').slice(0, 10).split('-').reverse().join('/');
+    var onde = a.dir ? (_PDF_DIR_LABEL[a.dir] || 'no aparelho') : 'gerado sob demanda';
+    return '<div class="arq-card">'
+      + '<div class="arq-top">'
+      +   '<span class="arq-nome">' + esc(a.nome) + '</span>'
+      +   '<span class="arq-badge ' + esc(a.tipo) + '">' + (_ARQ_BADGE[a.tipo] || 'PDF') + '</span>'
+      + '</div>'
+      + '<div class="arq-sub">' + esc(a.titulo || '') + '</div>'
+      + '<div class="arq-meta">' + quando + ' · ' + esc(onde) + '</div>'
+      + '<div class="arq-btns">'
+      +   '<button class="arq-btn abrir" onclick="abrirArquivo(\'' + a.id + '\')">ABRIR</button>'
+      +   '<button class="arq-btn" onclick="compartilharArquivo(\'' + a.id + '\')">ENVIAR</button>'
+      +   '<button class="arq-btn excluir" onclick="excluirArquivo(\'' + a.id + '\')">EXCLUIR</button>'
+      + '</div>'
+      + '</div>';
+  }).join('');
+}
+
+/* Regera o PDF a partir do registro de origem — é o caminho do PWA (onde
+   não há arquivo em disco) e o plano B quando o arquivo foi apagado. */
+function regerarArquivo(a) {
+  if (a.tipo === 'orcamento') {
+    var o = orcamentoById(a.refId);
+    if (!o) { showToast('O orçamento de origem não existe mais.'); return false; }
+    return gerarPdfOrcamento(o, a.nome);
+  }
+  if (a.tipo === 'recibo') {
+    var p = pagamentoById(a.refId);
+    if (!p) { showToast('O pagamento de origem não existe mais.'); return false; }
+    verRecibo(p.id, a.nome);
+    return true;
+  }
+  showToast('Não é possível reabrir este arquivo.');
+  return false;
+}
+
+function abrirArquivo(id) {
+  var a = arquivoById(id);
+  if (!a) return;
+  if (capNativo() && a.uri) { abrirPdfNativo(a.uri, a.nome, 'o PDF'); return; }
+  regerarArquivo(a);
+}
+
+function compartilharArquivo(id) {
+  var a = arquivoById(id);
+  if (!a) return;
+  var SH = pluginShare();
+  if (capNativo() && a.uri && SH) {
+    SH.share({ title: a.nome, url: a.uri, dialogTitle: 'Enviar ' + a.nome })
+      .catch(function(e) { diag('arquivos: Share falhou', e); showToast('Não foi possível compartilhar.'); });
+    return;
+  }
+  regerarArquivo(a);
+}
+
+function excluirArquivo(id) {
+  var a = arquivoById(id);
+  if (!a) return;
+  showConfirm('Excluir "' + a.nome + '"? O arquivo sai do aparelho e da lista.', function() {
+    var FS = pluginFilesystem();
+    /* o arquivo pode já ter sido apagado por fora — falha ali não impede
+       tirar o registro da lista */
+    var apagarDisco = (capNativo() && FS && a.dir)
+      ? FS.deleteFile({ path: a.nome, directory: a.dir }).catch(function(e) {
+          diag('arquivos: não apagou do disco', e);
+        })
+      : Promise.resolve();
+
+    apagarDisco.then(function() {
+      arquivos = arquivos.filter(function(x) { return x.id !== id; });
+      if (!_dbOk) { renderArquivos(); showToast('Removido da lista.'); return; }
+      return dbDelete('arquivos', id).then(function() {
+        renderArquivos();
+        showToast('PDF excluído.');
+      });
+    }).catch(function(e) {
+      console.error('excluirArquivo', e);
+      showToast('Não foi possível excluir.');
+    });
+  });
+}
+
 /* Recibo em PDF do pagamento pago (F6.5) */
-function verRecibo(id) {
+function verRecibo(id, nomeForcado) {
   var p = pagamentoById(id);
-  if (!p || p.status !== 'pago') return;
+  if (!p || totalRecebido(p) <= 0.004) return;
   if (!window.jspdf || !window.jspdf.jsPDF) {
     showToast('Gerador de PDF não carregado. Recarregue o app.');
     return;
@@ -763,34 +1251,71 @@ function verRecibo(id) {
 
   cabecalhoPdf(doc, W, M, navy, amber);
 
+  var recebido = totalRecebido(p);
+  var saldo = saldoPagamento(p);
+  var parcial = saldo > EPS;
+  var recs = recebimentosDe(p);
+  var ultimo = recs[recs.length - 1] || {};
+
   doc.setTextColor(navy[0], navy[1], navy[2]);
   doc.setFont('helvetica', 'bold'); doc.setFontSize(15);
-  doc.text('RECIBO DE PAGAMENTO', M, 48);
+  doc.text(parcial ? 'RECIBO PARCIAL' : 'RECIBO DE PAGAMENTO', M, 48);
 
-  var dataPg = (p.dataPagamento || hojeLocal()).split('-').reverse().join('/');
+  var dataPg = String(ultimo.data || p.dataPagamento || hojeLocal()).split('-').reverse().join('/');
+  var forma = ultimo.forma || p.forma;
   doc.setFont('helvetica', 'normal'); doc.setFontSize(11);
   doc.setTextColor(40, 40, 40);
-  var texto = 'Recebi de ' + (c ? c.nome : 'Cliente') + ' a quantia de ' + moedaPdf(p.valor)
-    + ' referente a "' + p.servico + '", paga em ' + dataPg
-    + (p.forma ? ' via ' + p.forma : '') + '.';
+  var texto = 'Recebi de ' + (c ? c.nome : 'Cliente') + ' a quantia de ' + moedaPdf(recebido)
+    + ' referente a "' + p.servico + '", cujo valor total combinado é ' + moedaPdf(p.valor) + '.';
+  if (parcial) {
+    texto += ' Este recibo é PARCIAL: permanece em aberto o saldo de ' + moedaPdf(saldo) + '.';
+  }
+  texto += ' Último recebimento em ' + dataPg + (forma ? ' via ' + forma : '') + '.';
   var linhas = doc.splitTextToSize(texto, W - 2 * M);
   doc.text(linhas, M, 62);
 
+  var yCaixa = 62 + linhas.length * 5.5 + 6;
+
   doc.setFillColor(248, 250, 252);
   doc.setDrawColor(226, 232, 240);
-  doc.rect(M, 80, W - 2 * M, 18, 'FD');
+  doc.rect(M, yCaixa, W - 2 * M, parcial ? 26 : 18, 'FD');
   doc.setFont('helvetica', 'bold'); doc.setFontSize(16);
   doc.setTextColor(21, 128, 61);
-  doc.text(moedaPdf(p.valor), W / 2, 92, { align: 'center' });
+  doc.text(moedaPdf(recebido), W / 2, yCaixa + 12, { align: 'center' });
+  if (parcial) {
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+    doc.setTextColor(180, 60, 30);
+    doc.text('Saldo em aberto: ' + moedaPdf(saldo), W / 2, yCaixa + 21, { align: 'center' });
+  }
 
+  var y = yCaixa + (parcial ? 26 : 18) + 10;
+
+  /* histórico só quando houve mais de uma entrada — num recibo cheio de
+     parcela única a tabela não acrescenta nada */
+  if (recs.length > 1) {
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
+    doc.setTextColor(navy[0], navy[1], navy[2]);
+    doc.text('RECEBIMENTOS', M, y);
+    y += 5;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+    doc.setTextColor(70, 70, 70);
+    recs.forEach(function(r) {
+      doc.text(String(r.data || '').split('-').reverse().join('/') + (r.forma ? '  ·  ' + r.forma : ''), M + 2, y);
+      doc.text(moedaPdf(r.valor), W - M - 2, y, { align: 'right' });
+      y += 5;
+    });
+    y += 6;
+  }
+
+  var yAssin = Math.max(y + 14, 130);
   doc.setDrawColor(120, 120, 120);
-  doc.line(M + 30, 130, W - M - 30, 130);
+  doc.line(M + 30, yAssin, W - M - 30, yAssin);
   doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
   doc.setTextColor(60, 60, 60);
-  doc.text(perfilEletricista.nome, W / 2, 136, { align: 'center' });
+  doc.text(perfilEletricista.nome, W / 2, yAssin + 6, { align: 'center' });
   if (perfilEletricista.documento) {
     doc.setFontSize(8); doc.setTextColor(120, 120, 120);
-    doc.text(perfilEletricista.documento, W / 2, 141, { align: 'center' });
+    doc.text(perfilEletricista.documento, W / 2, yAssin + 11, { align: 'center' });
   }
 
   doc.setFontSize(8); doc.setTextColor(150, 150, 150);
@@ -799,9 +1324,15 @@ function verRecibo(id) {
   var nomeArq = 'recibo-' + (c ? c.nome : 'cliente')
     .toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
-    + '-' + (p.dataPagamento || hojeLocal()) + '.pdf';
-  showToast('Recibo gerado!');
-  entregarPdf(doc, nomeArq, 'o recibo');
+    + '-' + (ultimo.data || p.dataPagamento || hojeLocal())
+    + (parcial ? '-parcial' : '') + '.pdf';
+  showToast(parcial ? 'Recibo parcial gerado!' : 'Recibo gerado!');
+  entregarPdf(doc, nomeForcado || nomeArq, 'o recibo', {
+    tipo: 'recibo',
+    refId: p.id,
+    titulo: (c ? c.nome : 'Cliente') + ' - ' + fmtBR(recebido) + (parcial ? ' (parcial)' : ''),
+    semPerguntar: !!nomeForcado
+  });
 }
 
 /* ================================================================
@@ -820,7 +1351,7 @@ function listaNotificacoes() {
     itens.push({
       dot: 'late', grupo: 'HOJE',
       titulo: 'Pagamento atrasado – ' + clienteNome(p.clienteId),
-      sub: fmtBR(p.valor) + ' · Venceu há ' + dias + (dias === 1 ? ' dia' : ' dias'),
+      sub: fmtBR(saldoPagamento(p)) + ' em aberto · Venceu há ' + dias + (dias === 1 ? ' dia' : ' dias'),
       acao: "goTo('screen-pagamentos')"
     });
   });
@@ -845,7 +1376,7 @@ function listaNotificacoes() {
       dot: 'pay', grupo: dias === 0 ? 'HOJE' : 'PRÓXIMOS DIAS',
       titulo: dias === 0 ? 'Pagamento vence hoje – ' + clienteNome(p.clienteId)
                          : 'Pagamento vence em ' + dias + (dias === 1 ? ' dia – ' : ' dias – ') + clienteNome(p.clienteId),
-      sub: fmtBR(p.valor) + ' · ' + p.servico,
+      sub: fmtBR(saldoPagamento(p)) + ' · ' + p.servico,
       acao: "goTo('screen-pagamentos')"
     });
   });
@@ -930,7 +1461,7 @@ function dispararNotificacoesLocais() {
     if (atrasados.length === 0) return;
     dbGet('preferencias', 'notifAtrasoDia').then(function(pref) {
       if (pref && pref.value === hoje) return;
-      var total = atrasados.reduce(function(s, p) { return s + p.valor; }, 0);
+      var total = atrasados.reduce(function(s, p) { return s + saldoPagamento(p); }, 0);
       notificar('Pagamentos atrasados', atrasados.length + ' pagamento(s) somando ' + fmtBR(total), 'atraso');
       dbPut('preferencias', { key: 'notifAtrasoDia', value: hoje }).catch(function() {});
     }).catch(function() {});
@@ -950,20 +1481,28 @@ function dispararNotificacoesLocais() {
     }).catch(function() {});
   });
 
-  /* lembrete 1h antes dos compromissos de hoje (toggle default ON) */
+  /* lembretes de 1h e 30min antes dos compromissos de hoje (toggle default ON).
+     É o fallback do PWA: aqui não há AlarmManager, então o aviso só sai
+     enquanto a aba estiver viva. No APK quem manda é agendarNotificacoesAg. */
   lerToggle('notif-agenda').then(function(on) {
     if (on === false || !podeNotificar()) return;
     var agora = new Date();
+    var avisos = [
+      { min: 60, titulo: 'Compromisso em 1 hora',    tag: 'ag1h-' },
+      { min: 30, titulo: '⏰ Compromisso em 30 min', tag: 'ag30-' }
+    ];
     agendamentos.forEach(function(a) {
-      if (a.data !== hoje) return;
+      if (a.data !== hoje || a.notifOn === false || a.concluido) return;
       var hm = a.hora.split(':');
       var quando = new Date(agora.getFullYear(), agora.getMonth(), agora.getDate(),
         parseInt(hm[0]), parseInt(hm[1]));
-      var msAte = quando.getTime() - 3600000 - agora.getTime(); /* 1h antes */
-      if (msAte < 0 || msAte > 12 * 3600000) return;
-      setTimeout(function() {
-        notificar('Compromisso em 1 hora', a.cliente + ' · ' + a.desc + ' às ' + a.hora, 'ag-' + a.id);
-      }, msAte);
+      avisos.forEach(function(av) {
+        var msAte = quando.getTime() - av.min * 60000 - agora.getTime();
+        if (msAte < 0 || msAte > 12 * 3600000) return;
+        setTimeout(function() {
+          notificar(av.titulo, a.cliente + ' · ' + a.desc + ' às ' + a.hora, av.tag + a.id);
+        }, msAte);
+      });
     });
   });
 }
@@ -971,17 +1510,26 @@ function dispararNotificacoesLocais() {
 /* ================================================================
    NOTIFICAÇÕES NATIVAS AGENDADAS (F7 · §6)
    Plugin @capacitor/local-notifications — disparam com o app fechado.
-   Offsets: 24h, 12h, 6h, 1h, 30min antes do compromisso.
+   Offsets: 24h, 12h, 6h, 1h e o ALARME de 30 min antes.
    Toggle por compromisso (campo ag.notifOn, default true).
    No navegador (PWA) tudo isto é no-op; vale o fallback local acima.
+
+   O de 30 min é o único marcado como alarme: vai por um canal de
+   importância MÁXIMA (heads-up + vibração) e depende do alarme EXATO do
+   Android. Do Android 12 em diante, sem a permissão de alarme exato o
+   plugin cai em setAndAllowWhileIdle e o disparo pode atrasar minutos
+   dentro do Doze — por isso a permissão é pedida no boot.
    ================================================================ */
 
+var CANAL_ALARME = 'eb-alarme';
+var CANAL_LEMBRETE = 'eb-lembrete';
+
 var _NOTIF_OFFSETS = [
-  { min: 1440, txt: 'amanhã' },
-  { min: 720,  txt: 'em 12 horas' },
-  { min: 360,  txt: 'em 6 horas' },
-  { min: 60,   txt: 'em 1 hora' },
-  { min: 30,   txt: 'em 30 minutos' }
+  { min: 1440, txt: 'amanhã',          canal: CANAL_LEMBRETE },
+  { min: 720,  txt: 'em 12 horas',     canal: CANAL_LEMBRETE },
+  { min: 360,  txt: 'em 6 horas',      canal: CANAL_LEMBRETE },
+  { min: 60,   txt: 'em 1 hora',       canal: CANAL_LEMBRETE },
+  { min: 30,   txt: 'em 30 minutos',   canal: CANAL_ALARME, alarme: true }
 ];
 
 function capNativo() {
@@ -1009,12 +1557,76 @@ function _dataHoraAg(ag) {
     parseInt(h[0]) || 0, parseInt(h[1]) || 0, 0, 0);
 }
 
+/* Canais são imutáveis depois de criados: mudar importância exige id novo
+   (por isso o sufixo de versão). Sem canal explícito o Android joga tudo
+   no canal padrão do Capacitor, de importância média, e o alarme de 30
+   min não aparece como heads-up. */
+function criarCanaisNotif() {
+  var LN = pluginLN();
+  if (!capNativo() || !LN || typeof LN.createChannel !== 'function') return Promise.resolve();
+  return Promise.all([
+    LN.createChannel({
+      id: CANAL_ALARME,
+      name: 'Alarme de compromisso',
+      description: 'Toca 30 minutos antes de cada compromisso da agenda.',
+      importance: 5,        /* IMPORTANCE_HIGH — heads-up + som */
+      visibility: 1,        /* VISIBILITY_PUBLIC — aparece na tela de bloqueio */
+      vibration: true,
+      lights: true
+    }),
+    LN.createChannel({
+      id: CANAL_LEMBRETE,
+      name: 'Lembretes de agenda',
+      description: 'Avisos de 24h, 12h, 6h e 1h antes do compromisso.',
+      importance: 4,
+      visibility: 1,
+      vibration: true
+    })
+  ]).catch(function(e) { diag('notif: falha ao criar canais', e); });
+}
+
 function garantirPermissaoNotif() {
   var LN = pluginLN();
   if (!capNativo() || !LN) return Promise.resolve(false);
   return LN.requestPermissions().then(function(r) {
     return r && r.display === 'granted';
   }).catch(function() { return false; });
+}
+
+/* Alarme exato (Android 12+). `pedir` abre a tela de Ajustes do sistema —
+   só quando o usuário pediu, nunca no boot. */
+function checarAlarmeExato() {
+  var LN = pluginLN();
+  if (!capNativo() || !LN || typeof LN.checkExactNotificationSetting !== 'function') {
+    return Promise.resolve('granted');
+  }
+  return LN.checkExactNotificationSetting()
+    .then(function(r) { return (r && r.exact_alarm) || 'granted'; })
+    .catch(function() { return 'granted'; });
+}
+
+function abrirAjustesAlarmeExato() {
+  var LN = pluginLN();
+  if (!capNativo() || !LN || typeof LN.changeExactNotificationSetting !== 'function') {
+    showToast('Disponível apenas no aplicativo instalado.');
+    return;
+  }
+  LN.changeExactNotificationSetting().then(function(r) {
+    diag('notif: alarme exato agora = ' + (r && r.exact_alarm));
+  }).catch(function(e) { diag('notif: não abriu ajustes de alarme exato', e); });
+}
+
+/* Avisa uma vez por sessão quando o alarme de 30 min vai sair impreciso */
+var _avisouAlarmeExato = false;
+function avisarSeAlarmeInexato() {
+  if (_avisouAlarmeExato) return;
+  checarAlarmeExato().then(function(estado) {
+    if (estado === 'granted') return;
+    _avisouAlarmeExato = true;
+    diag('notif: alarme exato NEGADO — o aviso de 30 min pode atrasar');
+    showConfirm('Para o alarme de 30 minutos tocar na hora certa, o Android precisa da permissão de "alarmes e lembretes". Abrir os ajustes agora?',
+      abrirAjustesAlarmeExato);
+  });
 }
 
 /* (re)agenda as 5 notificações de um compromisso — cancela antes p/ evitar duplicidade */
@@ -1035,8 +1647,11 @@ function agendarNotificacoesAg(ag) {
       if (at <= agora) return; /* só futuro */
       lista.push({
         id: ids[i],
-        title: 'Compromisso ' + off.txt,
+        title: (off.alarme ? '⏰ ' : '') + 'Compromisso ' + off.txt,
         body: ag.cliente + ' · ' + (ag.desc || 'Não definido') + ' às ' + ag.hora,
+        channelId: off.canal,
+        /* allowWhileIdle é o que faz o plugin usar setExactAndAllowWhileIdle;
+           sem isso o Doze pode segurar o disparo até a próxima janela */
         schedule: { at: new Date(at), allowWhileIdle: true }
       });
     });
@@ -1055,9 +1670,12 @@ function cancelarNotificacoesAg(ag) {
 /* reagenda tudo no boot (datas mudam, app reinstalado, etc.) */
 function reagendarTodasNotificacoes() {
   if (!capNativo() || !pluginLN()) return;
-  garantirPermissaoNotif().then(function() {
-    agendamentos.forEach(function(a) { agendarNotificacoesAg(a); });
-  });
+  criarCanaisNotif()
+    .then(garantirPermissaoNotif)
+    .then(function() {
+      agendamentos.forEach(function(a) { agendarNotificacoesAg(a); });
+      avisarSeAlarmeInexato();
+    });
 }
 
 /* ================================================================
@@ -1754,8 +2372,9 @@ function renderPerfilCliente() {
   var faturado = 0, aberto = 0;
   pagamentos.forEach(function(p) {
     if (p.clienteId !== id) return;
-    if (p.status === 'pago') faturado += p.valor;
-    else aberto += p.valor;
+    faturado += totalRecebido(p);
+    var saldo = saldoPagamento(p);
+    if (saldo > EPS) aberto += saldo;
   });
   document.getElementById('pc-faturado').textContent = fmtBR(faturado);
   document.getElementById('pc-aberto').textContent = fmtBR(aberto);
@@ -1810,7 +2429,7 @@ function excluirCliente() {
     msg += ' Serão apagados junto: ' + partes.join(', ') + '.';
   }
   if (pendentes.length > 0) {
-    var totalAberto = pendentes.reduce(function(s, p) { return s + p.valor; }, 0);
+    var totalAberto = pendentes.reduce(function(s, p) { return s + saldoPagamento(p); }, 0);
     msg += ' ATENÇÃO: há ' + fmtBR(totalAberto) + ' em aberto que deixará de ser cobrado.';
   }
   msg += ' Esta ação não pode ser desfeita.';
@@ -2622,7 +3241,7 @@ function cabecalhoPdf(doc, W, M, navy, amber) {
   doc.text([pe.telefone, pe.email].filter(Boolean).join(' · '), M, 25);
 }
 
-function gerarPdfOrcamento(o) {
+function gerarPdfOrcamento(o, nomeForcado) {
   if (!window.jspdf || !window.jspdf.jsPDF) {
     showToast('Gerador de PDF não carregado. Recarregue o app.');
     return false;
@@ -2763,7 +3382,12 @@ function gerarPdfOrcamento(o) {
     .toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
     + '-' + o.data + (o.rev ? '-rev' + o.rev : '') + '.pdf';
-  entregarPdf(doc, nomeArq, 'o orçamento');
+  entregarPdf(doc, nomeForcado || nomeArq, 'o orçamento', {
+    tipo: 'orcamento',
+    refId: o.id,
+    titulo: (c ? c.nome : 'Cliente') + ' - ' + fmtBR(totalMat + totalMob),
+    semPerguntar: !!nomeForcado
+  });
   return true;
 }
 
@@ -2983,7 +3607,7 @@ function excluirOrcamento() {
   if (pagsVinculados.length > 0) {
     msg += ' O pagamento gerado por ele também será apagado.';
     if (emAberto.length > 0) {
-      var total = emAberto.reduce(function(s, p) { return s + p.valor; }, 0);
+      var total = emAberto.reduce(function(s, p) { return s + saldoPagamento(p); }, 0);
       msg += ' ATENÇÃO: há ' + fmtBR(total) + ' em aberto que deixará de ser cobrado.';
     }
   }
@@ -3102,7 +3726,8 @@ function aprovarOrcamento() {
       status: 'pendente',
       forma: null,
       dataVencimento: dataVencimento,
-      dataPagamento: null
+      dataPagamento: null,
+      recebimentos: []
     };
     if (!_dbOk) {
       /* sem persistência: aplica em memória e avisa (SPEC §7.1) */
@@ -3136,10 +3761,11 @@ function renderPayHome() {
   var list = document.getElementById('pay-home-list');
   if (!list) return;
   var pendentes = pagamentos.filter(function(p) { return statusPagamento(p) !== 'pago'; });
-  var totalReceber = pendentes.reduce(function(s, p) { return s + p.valor; }, 0);
+  /* a receber = saldo em aberto; um parcial só conta o que ainda falta */
+  var totalReceber = pendentes.reduce(function(s, p) { return s + saldoPagamento(p); }, 0);
   var html = '<div class="pay-home-card today" onclick="goTo(\'screen-pagamentos\')" role="button" aria-label="Ver pagamentos a receber"><span class="pnome">A RECEBER:</span><span class="pvalor">' + fmtBR(totalReceber) + '</span></div>';
   pendentes.slice(0, 2).forEach(function(p) {
-    html += '<div class="pay-home-card" onclick="goTo(\'screen-pagamentos\')" role="button"><span class="pnome">' + esc(clienteNome(p.clienteId)) + '</span><span class="pvalor">' + fmtBR(p.valor) + '</span></div>';
+    html += '<div class="pay-home-card" onclick="goTo(\'screen-pagamentos\')" role="button"><span class="pnome">' + esc(clienteNome(p.clienteId)) + '</span><span class="pvalor">' + fmtBR(saldoPagamento(p)) + '</span></div>';
   });
   if (pendentes.length === 0) html = '<div class="empty-state">Nenhum pagamento pendente.</div>';
   list.innerHTML = html;
@@ -3148,8 +3774,9 @@ function renderPayHome() {
 function renderRelatorio() {
   var faturado = 0, aberto = 0, pagos = 0;
   pagamentos.forEach(function(p) {
-    if (p.status === 'pago') { faturado += p.valor; pagos++; }
-    else { aberto += p.valor; }
+    faturado += totalRecebido(p);
+    var saldo = saldoPagamento(p);
+    if (saldo > EPS) aberto += saldo; else pagos++;
   });
   var el1 = document.getElementById('rel-faturado');      if (el1) el1.textContent = fmtBR(faturado);
   var el2 = document.getElementById('rel-aberto');        if (el2) el2.textContent = fmtBR(aberto);
@@ -3178,9 +3805,11 @@ function renderRelatorio() {
       });
     }
     pagamentos.forEach(function(p) {
-      if (p.status !== 'pago' || !p.dataPagamento) return;
-      mesesChart.forEach(function(mc) {
-        if (p.dataPagamento.indexOf(mc.prefixo) === 0) mc.total += p.valor;
+      recebimentosDe(p).forEach(function(r) {
+        if (!r.data) return;
+        mesesChart.forEach(function(mc) {
+          if (r.data.indexOf(mc.prefixo) === 0) mc.total += Number(r.valor) || 0;
+        });
       });
     });
     var maxMes = Math.max.apply(null, mesesChart.map(function(m) { return m.total; }).concat([1]));
@@ -3196,8 +3825,9 @@ function renderRelatorio() {
   /* TOP CLIENTES por total pago */
   var porCliente = {};
   pagamentos.forEach(function(p) {
-    if (p.status !== 'pago' || !p.clienteId) return;
-    porCliente[p.clienteId] = (porCliente[p.clienteId] || 0) + p.valor;
+    var recebido = totalRecebido(p);
+    if (recebido <= EPS || !p.clienteId) return;
+    porCliente[p.clienteId] = (porCliente[p.clienteId] || 0) + recebido;
   });
   var ranking = Object.keys(porCliente).map(function(cid) {
     return { clienteId: cid, total: porCliente[cid] };
@@ -3311,6 +3941,7 @@ function goTo(id, semEmpilhar) {
   if (id === 'screen-perfil-eletricista') renderPerfilEletricista();
   if (id === 'screen-diagnostico') renderDiagnostico();
   if (id === 'screen-relatorio') renderRelatorio();
+  if (id === 'screen-arquivos') renderArquivos();
   if (id === 'screen-orcamento') renderOrcamento();
   if (id === 'screen-picker-material') renderPickerMaterial();
   if (id === 'screen-picker-cliente') renderPickerCliente();
@@ -3343,6 +3974,10 @@ function history_back() {
 /* Fecha o modal visível, se houver. true = fechou algo.
    Passa pelos cancel() para que os callbacks pendentes sejam limpos. */
 function fecharModalAberto() {
+  var receber = document.getElementById('receber-modal');
+  if (receber && receber.classList.contains('show')) { receberCancel(); return true; }
+  var arqNome = document.getElementById('arq-nome-modal');
+  if (arqNome && arqNome.classList.contains('show')) { arqNomeCancel(); return true; }
   var texto = document.getElementById('texto-modal');
   if (texto && texto.classList.contains('show')) { textoCancel(); return true; }
   var venc = document.getElementById('venc-modal');
@@ -3559,7 +4194,8 @@ function aplicarBackup(dados) {
 
 openDB().then(function() {
   _dbOk = true;
-  return seedIfEmpty().then(loadAll).then(carregarPerfilEletricista).then(carregarCategorias);
+  return seedIfEmpty().then(limparDadosExemploUmaVez).then(loadAll)
+    .then(carregarPerfilEletricista).then(carregarCategorias);
 }).catch(function(e) {
   console.error('IndexedDB indisponível:', e);
   _dbOk = false;

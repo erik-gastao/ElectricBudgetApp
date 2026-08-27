@@ -42,6 +42,7 @@
 <div class="quick-btns">
 <div class="quick-btn" onclick="goTo('screen-clientes')" aria-label="Ir para clientes">CLIENTES</div>
 <div class="quick-btn" onclick="goTo('screen-materiais')" aria-label="Ir para materiais">MATERIAIS</div>
+<div class="quick-btn" onclick="goTo('screen-arquivos')" aria-label="Ir para os PDFs salvos">PDFs</div>
 </div>
 <div class="home-search" role="search">
 <span class="home-search-icon" aria-hidden="true">🔍</span>
@@ -104,11 +105,16 @@
 <div class="ps-label">ESTE MÊS</div>
 <div class="ps-val" id="pay-sum-mes">R$ 0,00</div>
 </div>
+<div class="pay-summary-card aberto">
+<div class="ps-label">EM ABERTO</div>
+<div class="ps-val" id="pay-sum-aberto">R$ 0,00</div>
+</div>
 </div>
 <div class="filter-row">
 <div class="filter-chip active" onclick="filterPagamentos(this)">TODOS</div>
 <div class="filter-chip" onclick="filterPagamentos(this)">PENDENTE</div>
 <div class="filter-chip" onclick="filterPagamentos(this)">ATRASADO</div>
+<div class="filter-chip" onclick="filterPagamentos(this)">PARCIAL</div>
 <div class="filter-chip" onclick="filterPagamentos(this)">PAGO</div>
 <div class="filter-chip" onclick="filterPagamentos(this)">ESTE MÊS</div>
 </div>
@@ -285,9 +291,9 @@
       NOVO CLIENTE <span>+</span>
 </button>
 <div class="form-section">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+<div class="form-section-head">
 <span class="form-section-label">MATERIAIS</span>
-<span class="adicionar-link" onclick="abrirPickerMaterial()">ADICIONAR +</span>
+<button type="button" class="btn-adicionar" onclick="abrirPickerMaterial()" aria-label="Adicionar material ao orçamento"><span class="btn-adicionar-mais" aria-hidden="true">+</span> ADICIONAR MATERIAL</button>
 </div>
 <div class="orc-table-header">
 <span>ITEM</span><span style="text-align:center;">QTD</span><span style="text-align:right;">TOTAL</span><span></span>
@@ -297,9 +303,9 @@
 </div>
 </div>
 <div class="form-section">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+<div class="form-section-head">
 <span class="form-section-label">MÃO DE OBRA</span>
-<span class="adicionar-link" onclick="toggleFormMob()">ADICIONAR +</span>
+<button type="button" class="btn-adicionar" onclick="toggleFormMob()" aria-label="Adicionar mão de obra ao orçamento"><span class="btn-adicionar-mais" aria-hidden="true">+</span> ADICIONAR SERVIÇO</button>
 </div>
 <div id="orc-mob-form" style="display:none;margin-bottom:10px;">
 <input id="mob-nome-input" class="field-input" placeholder="Ex: Instalação de quadro" type="text" maxlength="120" style="margin-bottom:6px;"/>
@@ -323,6 +329,26 @@
 <div class="dual-btns">
 <button id="orc-btn-rascunho" class="dual-btn" onclick="salvarRascunho()" aria-label="Salvar como rascunho">RASCUNHO</button>
 <button id="orc-btn-pdf" class="dual-btn primary" onclick="salvarOrcamentoPDF()" aria-label="Salvar orçamento">SALVAR PDF</button>
+</div>
+</div>
+<!-- ===== PDFs GERADOS ===== -->
+<div class="screen" id="screen-arquivos">
+<div class="topbar">
+<div class="topbar-row">
+<button class="back-btn" onclick="navBack()" aria-label="Voltar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
+<span class="topbar-title">PDFs</span>
+<span style="width:40px;"></span>
+</div>
+</div>
+<div class="scroll-body">
+<div class="filter-row">
+<div class="filter-chip active" onclick="filterArquivos(this)">TODOS</div>
+<div class="filter-chip" onclick="filterArquivos(this)">ORÇAMENTOS</div>
+<div class="filter-chip" onclick="filterArquivos(this)">RECIBOS</div>
+</div>
+<div class="clientes-count" id="arq-count">0 ARQUIVOS</div>
+<div id="arq-list"></div>
+<div style="height:16px;"></div>
 </div>
 </div>
 <!-- ===== PICKER MATERIAL ===== -->
@@ -659,13 +685,29 @@
 <div class="toggle on" data-key="notif-pagamento" onclick="toggleSwitch(this)"><div class="toggle-knob"></div></div>
 </div>
 <div class="config-row">
-<span class="config-label">Lembrete de agenda (1h antes)</span>
+<span class="config-label">Lembrete de agenda (24h, 12h, 6h e 1h antes)</span>
 <div class="toggle on" data-key="notif-agenda" onclick="toggleSwitch(this)"><div class="toggle-knob"></div></div>
 </div>
 <div class="config-row">
 <span class="config-label">Avisos de pagamento atrasado</span>
 <div class="toggle" data-key="notif-atraso" onclick="toggleSwitch(this)"><div class="toggle-knob"></div></div>
 </div>
+<div class="form-section-label" style="margin-bottom:6px;margin-top:20px;">ALARME DA AGENDA</div>
+<div style="border-top:1.5px solid #222;margin-bottom:10px;"></div>
+<div style="font-size:12px;color:#94785A;margin-bottom:10px;line-height:1.5;">
+Todo compromisso dispara um alarme 30 minutos antes. No Android 12 ou mais novo
+o sistema exige a permissão de "alarmes e lembretes" para o horário ser exato.
+</div>
+<button class="sync-btn" onclick="abrirAjustesAlarmeExato()"><span aria-hidden="true">⏰</span> PERMISSÃO DE ALARME EXATO</button>
+
+<div class="form-section-label" style="margin-bottom:6px;margin-top:20px;">DADOS DE EXEMPLO</div>
+<div style="border-top:1.5px solid #222;margin-bottom:10px;"></div>
+<div style="font-size:12px;color:#94785A;margin-bottom:10px;line-height:1.5;">
+As versões antigas vinham com clientes, compromissos e pagamentos fictícios.
+Use se algum deles ainda aparecer na sua lista.
+</div>
+<button class="sync-btn" onclick="limparDadosExemplo()"><span aria-hidden="true">🧹</span> REMOVER DADOS DE EXEMPLO</button>
+
 <div class="form-section-label" style="margin-bottom:6px;margin-top:20px;">BACKUP</div>
 <div style="border-top:1.5px solid #222;margin-bottom:10px;"></div>
 <div style="font-size:12px;color:#94785A;margin-bottom:10px;line-height:1.5;">
@@ -839,6 +881,46 @@ Abra aqui se algo não estiver funcionando.
 <div class="confirm-btns">
 <button class="confirm-btn" onclick="vencCancel()" aria-label="Cancelar aprovação">CANCELAR</button>
 <button class="confirm-btn danger" style="background:#3b82f6;border-color:#3b82f6;" onclick="vencOk()" aria-label="Confirmar aprovação">APROVAR</button>
+</div>
+</div>
+</div>
+
+<!-- nome do arquivo antes de gravar o PDF -->
+<div id="arq-nome-modal" class="confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="arq-nome-msg">
+<div class="confirm-box">
+<div class="confirm-msg" id="arq-nome-msg">Nome do arquivo</div>
+<div class="arq-nome-linha">
+<input id="arq-nome-input" class="venc-input" type="text" maxlength="60" autocomplete="off" aria-label="Nome do arquivo"/>
+<span class="arq-nome-ext" aria-hidden="true">.pdf</span>
+</div>
+<div id="arq-nome-erro" style="display:none;color:#ef4444;font-size:12px;margin-bottom:10px;font-weight:600;"></div>
+<div class="confirm-btns">
+<button class="confirm-btn" onclick="arqNomeCancel()">CANCELAR</button>
+<button class="confirm-btn danger" style="background:var(--brand-dark);border-color:var(--brand-dark);" onclick="arqNomeOk()">SALVAR PDF</button>
+</div>
+</div>
+</div>
+
+<!-- recebimento parcial de um pagamento -->
+<div id="receber-modal" class="confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="receber-msg">
+<div class="confirm-box">
+<div class="confirm-msg" id="receber-msg">Registrar recebimento</div>
+<div class="receber-resumo" id="receber-resumo"></div>
+<div class="field-label">VALOR RECEBIDO (R$)</div>
+<input id="receber-valor" class="venc-input" type="text" inputmode="numeric" maxlength="14" oninput="mascaraMoeda(this)" aria-label="Valor recebido"/>
+<div class="field-label">DATA DO RECEBIMENTO</div>
+<input id="receber-data" class="venc-input" type="date" aria-label="Data do recebimento"/>
+<div class="field-label">FORMA</div>
+<div class="filter-row" id="receber-forma-row" style="flex-wrap:wrap;gap:6px;margin-bottom:14px;">
+<div class="filter-chip active" onclick="selectFormaReceber(this)">PIX</div>
+<div class="filter-chip" onclick="selectFormaReceber(this)">DINHEIRO</div>
+<div class="filter-chip" onclick="selectFormaReceber(this)">CARTÃO</div>
+<div class="filter-chip" onclick="selectFormaReceber(this)">BOLETO</div>
+</div>
+<div id="receber-erro" style="display:none;color:#ef4444;font-size:12px;margin-bottom:10px;font-weight:600;"></div>
+<div class="confirm-btns">
+<button class="confirm-btn" onclick="receberCancel()">CANCELAR</button>
+<button class="confirm-btn danger" style="background:#16a34a;border-color:#16a34a;" onclick="receberOk()">REGISTRAR</button>
 </div>
 </div>
 </div>

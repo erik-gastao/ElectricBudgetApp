@@ -1,11 +1,11 @@
 /* ================================================================
    Electric Budget — camada IndexedDB (SPEC §4.2)
-   Banco 'electricbudget' v1 · 6 object stores · keyPath 'id'
+   Banco 'electricbudget' v2 · 7 object stores · keyPath 'id'
    (exceto 'preferencias', keyPath 'key')
    ================================================================ */
 
 var DB_NAME = 'electricbudget';
-var DB_VERSION = 1;
+var DB_VERSION = 2;
 var _dbPromise = null;
 
 function openDB() {
@@ -43,6 +43,13 @@ function openDB() {
         sp.createIndex('clienteId', 'clienteId');
         sp.createIndex('status', 'status');
         sp.createIndex('data', 'dataVencimento');
+      }
+      /* v2 — PDFs gerados (nome do arquivo, onde foi gravado, origem).
+         Só metadado: o binário mora no disco do aparelho, não aqui. */
+      if (!db.objectStoreNames.contains('arquivos')) {
+        var sf = db.createObjectStore('arquivos', { keyPath: 'id', autoIncrement: false });
+        sf.createIndex('criadoEm', 'criadoEm');
+        sf.createIndex('tipo', 'tipo');
       }
       if (!db.objectStoreNames.contains('preferencias')) {
         db.createObjectStore('preferencias', { keyPath: 'key' });
