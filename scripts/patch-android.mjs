@@ -288,6 +288,16 @@ function patchPluginRelogio() {
     public void onCreate(android.os.Bundle savedInstanceState) {
         registerPlugin(EbRelogioPlugin.class);
         super.onCreate(savedInstanceState);
+
+        // Zoom desligado na marra. O meta viewport com user-scalable=no
+        // cobre o caso normal, mas um arrasto começado na barra de baixo
+        // ainda conseguia dar zoom-out: a moldura de "celular" voltava
+        // centralizada, com o fundo azul em volta, e a tela inteira
+        // ficava arrastável. Aqui o WebView nem oferece o gesto.
+        android.webkit.WebSettings ws = getBridge().getWebView().getSettings();
+        ws.setSupportZoom(false);
+        ws.setBuiltInZoomControls(false);
+        ws.setDisplayZoomControls(false);
     }
 }`
   );

@@ -1560,6 +1560,14 @@ var _NOTIF_OFFSETS = [
   { min: 30,   txt: 'em 30 minutos',   canal: CANAL_ALARME, alarme: true }
 ];
 
+/* Dentro do APK o app é a tela inteira — a moldura de celular só faz
+   sentido na pré-visualização em desktop. A classe evita depender do
+   `@media (max-width: 480px)`, que falha se o WebView reportar uma
+   largura de layout maior (e aí a moldura volta no meio da tela). */
+function marcarModoNativo() {
+  if (capNativo()) document.body.classList.add('app-nativo');
+}
+
 function capNativo() {
   return !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function'
     && window.Capacitor.isNativePlatform());
@@ -4729,6 +4737,7 @@ openDB().then(function() {
     showToast('Armazenamento indisponível — os dados não serão salvos neste navegador.');
   }, 500);
 }).then(function() {
+  marcarModoNativo();
   refreshPickerBotoes();
   renderHomeAgenda();
   renderHomeOrcamentos();

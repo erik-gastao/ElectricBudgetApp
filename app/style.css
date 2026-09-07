@@ -1014,10 +1014,29 @@
   .venc-input { width: 100%; border: 1.5px solid #e5d4b8; border-radius: 10px; padding: 10px 14px; font-size: 14px; color: var(--ink); outline: none; background: #fff; margin-bottom: 16px; font-family: inherit; accent-color: var(--brand); color-scheme: light; }
   .venc-input::-webkit-calendar-picker-indicator { filter: invert(48%) sepia(69%) saturate(560%) hue-rotate(2deg); cursor: pointer; }
 
+  /* O documento nunca rola nem "estica": quem rola é o .scroll-body.
+     Sem overscroll-behavior o arrasto que começa numa área sem rolagem
+     (bottom-bar, topbar) vazava pro documento e arrastava a tela toda. */
+  html, body { overscroll-behavior: none; }
+  .scroll-body { overscroll-behavior: contain; }
+  /* pan-x pan-y deixa rolar nos dois eixos (o .scroll-body na vertical,
+     as filter-row na horizontal) e tira do WebView tanto o pinça-pra-zoom
+     quanto o duplo-toque-pra-zoom — `manipulation` ainda permitiria a
+     pinça. As barras fixas não respondem a gesto nenhum. */
+  body { touch-action: pan-x pan-y; }
+  .topbar, .bottom-bar, .dual-btns { touch-action: none; }
+
   /* CELULAR: app ocupa a tela toda (instalado via PWA)
      svh = viewport com a barra de URL visível — garante que a
      bottom-bar (FABs) nunca fique atrás da barra do navegador.
-     dvh (onde suportado) acompanha a barra dinamicamente. */
+     dvh (onde suportado) acompanha a barra dinamicamente.
+
+     Duas portas de entrada de propósito: a media query cobre o PWA no
+     navegador, e `body.app-nativo` (posta no boot quando roda dentro do
+     Capacitor) cobre o APK mesmo se o WebView reportar uma largura de
+     layout maior que 480px — quando isso acontecia a media query não
+     casava, a moldura de "celular de mentira" reaparecia centralizada
+     com o fundo azul em volta e a página ficava arrastável. */
   @media (max-width: 480px) {
     body {
       padding: 0;
@@ -1034,6 +1053,24 @@
     .bottom-bar, .dual-btns {
       padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
     }
+  }
+
+  /* mesmas regras, sem depender da largura reportada pelo WebView */
+  body.app-nativo {
+    padding: 0;
+    height: 100vh; height: 100svh; height: 100dvh;
+    overflow: hidden;
+  }
+  body.app-nativo .phone {
+    height: 100%;
+    width: 100vw; max-width: none;
+    aspect-ratio: auto;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  body.app-nativo .bottom-bar,
+  body.app-nativo .dual-btns {
+    padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
   }
 
   /* flexbox: corpo rolável nunca empurra a bottom-bar pra fora */
