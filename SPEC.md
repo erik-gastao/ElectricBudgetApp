@@ -257,7 +257,11 @@ rascunho ──[enviar]──▶ enviado ──[APROVAR]──▶ aprovado ─�
 - `rascunho`: salvo local (`salvarRascunho`), ainda não mandado.
 - `enviado`: mandado ao cliente. **Enviar ≠ aceito** — fica aqui até o cliente responder.
 - `aprovado`: cliente aceitou. Botão **APROVAR** (manual) faz a transição **e gera um Pagamento**
-  (ver abaixo). Orçamento aprovado vira read-only (não editar itens — quebraria o total já cobrado).
+  (ver abaixo). Aprovado **continua editável**: obra em andamento tem reajuste de mão de obra e
+  material. Editar gera nova revisão e reajusta o Pagamento vinculado (`valor` e `servico`) na
+  **mesma transação**; os `recebimentos` já lançados nunca são apagados — só o saldo muda, e o
+  status volta a `pendente` se o novo total abrir saldo. Reduzir o total abaixo do já recebido é
+  bloqueado no salvamento (saldo negativo): desfaça o recebimento antes.
 - `recusado`: cliente não quis. Estado final, nenhum pagamento. Serve pra métrica "serviços perdidos".
 
 **Geração do Pagamento** (ao aprovar orçamento):

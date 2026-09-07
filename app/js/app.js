@@ -3854,13 +3854,36 @@ function saveOrcamento(status, gerarPdf) {
   }
   orc.total = totalOrcamento(orc);
 
+  /* Aprovado editado: a cobrança vinculada acompanha o novo total, mas os
+     recebimentos já lançados são intocáveis. Se o total novo fica abaixo do
+     que já entrou, o saldo viraria negativo — barra e manda desfazer a baixa
+     primeiro, que é a operação que existe pra isso. */
+  var pagVinc = orc.status === 'aprovado' ? pagamentoDoOrcamento(orc.id) : null;
+  var pagNovo = null;
+  if (pagVinc) {
+    var recebido = totalRecebido(pagVinc);
+    if (orc.total < recebido - EPS) {
+      erro.textContent = 'Total (' + fmtBR(orc.total) + ') menor que o já recebido ('
+        + fmtBR(recebido) + '). Desfaça um recebimento antes de reduzir o orçamento.';
+      erro.style.display = 'block';
+      return;
+    }
+    pagNovo = Object.assign({}, pagVinc, {
+      valor: orc.total,
+      servico: resumoOrcamento(orc),
+      /* lista preservada por referência de conteúdo: nada é removido */
+      recebimentos: recebimentosDe(pagVinc).map(function(r) { return Object.assign({}, r); })
+    });
+    sincronizarStatusPagamento(pagNovo);
+  }
+
   var idx = -1;
   for (var i = 0; i < orcamentos.length; i++) if (orcamentos[i].id === orc.id) idx = i;
   if (idx >= 0) orcamentos[idx] = orc; else orcamentos.push(orc);
   _orcEditId = null;
   _orcEditStatus = null;
 
-  persistPut('orcamentos', orc, function() {
+  var concluir = function() {
     var pdfOk = false;
     if (gerarPdf) {
       try { pdfOk = gerarPdfOrcamento(orc); }
@@ -3875,6 +3898,37 @@ function saveOrcamento(status, gerarPdf) {
     setPickerCliente('orc', '');
     aplicarDescontoUI();
     goTo('screen-home');
+  };
+
+  /* aplica no pagamento em memória só depois que o disco confirmou */
+  var aplicarPag = function() {
+    if (!pagNovo) return;
+    for (var j = 0; j < pagamentos.length; j++) {
+      if (pagamentos[j].id === pagNovo.id) { pagamentos[j] = pagNovo; break; }
+    }
+  };
+
+  if (!pagNovo) {
+    persistPut('orcamentos', orc, concluir);
+    return;
+  }
+  if (!_dbOk) {
+    aplicarPag();
+    showToast('Armazenamento indisponível — alteração não será salva.');
+    concluir();
+    return;
+  }
+  /* orçamento e cobrança numa ÚNICA transação: nunca sobra total novo com
+     cobrança velha (ou vice-versa) */
+  dbPutMany([
+    { store: 'orcamentos', obj: orc },
+    { store: 'pagamentos', obj: pagNovo }
+  ]).then(function() {
+    aplicarPag();
+    concluir();
+  }).catch(function(e) {
+    console.error('salvar orcamento aprovado', e);
+    showToast(ERRO_SALVAR);
   });
 }
 
@@ -4033,7 +4087,8 @@ function renderOrcDetalhe() {
       + '<button class="dual-btn primary" onclick="aprovarOrcamento()">APROVAR</button>';
   } else if (o.status === 'aprovado') {
     var pg = pagamentoDoOrcamento(o.id);
-    btns.innerHTML = '<button class="dual-btn" onclick="pdfDoDetalhe()">GERAR PDF</button>'
+    btns.innerHTML = '<button class="dual-btn" onclick="editarOrcamento()">EDITAR</button>'
+      + '<button class="dual-btn" onclick="pdfDoDetalhe()">GERAR PDF</button>'
       + (!pg ? ''
          : (saldoPagamento(pg) > EPS
              ? '<button class="dual-btn primary" onclick="receberDoOrcamento()">RECEBER</button>'
@@ -4187,12 +4242,15 @@ function pdfDoDetalhe() {
   }
 }
 
-/* Rascunho e ENVIADO são editáveis. Aprovado não: já gerou Pagamento
-   (SPEC §8.1) e mexer no total deixaria a cobrança divergindo do
-   orçamento; recusado é somente leitura. */
+/* Rascunho, ENVIADO e APROVADO são editáveis; recusado é somente leitura.
+   No aprovado a obra já começou e reajuste de mão de obra/material é
+   rotina: a cobrança vinculada (SPEC §8.1) é reajustada junto, na mesma
+   transação, e os recebimentos já lançados ficam intactos — só o saldo
+   muda. Reduzir o total abaixo do que já foi recebido é barrado no
+   salvamento (viraria saldo negativo). */
 function editarOrcamento() {
   var o = orcamentoById(_orcDetalheId);
-  if (!o || (o.status !== 'rascunho' && o.status !== 'enviado')) return;
+  if (!o || (o.status !== 'rascunho' && o.status !== 'enviado' && o.status !== 'aprovado')) return;
   var abrir = function() {
     _orcEditId = o.id;
     _orcEditStatus = o.status;
@@ -4204,12 +4262,23 @@ function editarOrcamento() {
     };
     fecharFormMob();
     document.getElementById('orc-form-title').textContent =
-      o.status === 'enviado' ? 'Revisar Orçamento' : 'Editar Orçamento';
+      o.status === 'rascunho' ? 'Editar Orçamento' : 'Revisar Orçamento';
     document.getElementById('orc-erro').style.display = 'none';
     setPickerCliente('orc', o.clienteId);
     aplicarDescontoUI();
     goTo('screen-orcamento');
   };
+  if (o.status === 'aprovado') {
+    var pgEd = pagamentoDoOrcamento(o.id);
+    var msg = 'Este orçamento já foi aprovado. Editar cria a revisão '
+      + ((o.rev || 0) + 1) + ', que ficará marcada no PDF.';
+    if (pgEd) {
+      msg += ' A cobrança vinculada passa a valer o novo total; os '
+        + fmtBR(totalRecebido(pgEd)) + ' já recebidos continuam lançados.';
+    }
+    showConfirm(msg + ' Continuar?', abrir);
+    return;
+  }
   if (o.status === 'enviado') {
     showConfirm('Este orçamento já foi enviado ao cliente. Editar cria a revisão '
       + ((o.rev || 0) + 1) + ', que ficará marcada no PDF. Continuar?', abrir);
