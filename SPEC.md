@@ -110,12 +110,20 @@ Iniciais do nome geram avatar (2 primeiras palavras).
 
 ### Orcamento
 ```
-{ id, clienteId, data, status: 'rascunho'|'enviado'|'aprovado'|'recusado', materiais: [ItemMaterial], maoDeObra: [ItemMob], total }
-ItemMaterial = { materialId, nome, unit, preco, qty }
+{ id, clienteId, data, status: 'rascunho'|'enviado'|'aprovado'|'recusado', materiais: [ItemMaterial], maoDeObra: [ItemMob], fotos: [Foto], desconto: Desconto|null, total }
+ItemMaterial = { materialId, nome, unit, preco, qty }   // qty aceita fração (0.25 / 0.5 / 2)
 ItemMob      = { nome, valor }
+Foto         = { id, nome, w, h, dataUrl }              // JPEG reduzido, vira página de anexo do PDF
+Desconto     = { tipo: 'valor'|'percent'|'final', valor: number }
 ```
-**Regra crítica:** `total` = soma(materiais.preco × qty) + soma(maoDeObra.valor).
-Nunca persistir um total calculado por fora sem revalidar os itens (risco de dessincronização).
+**Regra crítica:** `subtotal` = soma(materiais.preco × qty) + soma(maoDeObra.valor);
+`total` = `subtotal` − desconto. Nunca persistir um total calculado por fora sem
+revalidar os itens (risco de dessincronização).
+
+`desconto.tipo`: `valor` abate R$; `percent` abate % do subtotal; `final` guarda o
+valor CHEIO que se quer cobrar e o abatimento é derivado dele (arredondamento de
+fechamento). O abatimento é travado entre 0 e o subtotal — nunca vira acréscimo,
+nunca deixa o total negativo.
 
 ### Agendamento
 ```

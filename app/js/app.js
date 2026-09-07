@@ -34,6 +34,26 @@ function round2(v) {
   return Math.round((Number(v) + Number.EPSILON) * 100) / 100;
 }
 
+/* ── QUANTIDADE FRACIONADA ──
+   Material vendido por metro raramente sai em número redondo: 0,25 m de
+   cabo custa um quarto do metro, e cobrar 1 m inteiro inflava o orçamento.
+   A qtd passa a aceitar fração de duas casas; quem é por unidade continua
+   inteiro na prática (ninguém digita 0,5 tomada). */
+
+/* limita a 2 casas e ao intervalo cobrável; vazio/zero volta pro mínimo */
+function normQty(v) {
+  var q = round2(parseFloat(String(v == null ? '' : v).replace(',', '.')));
+  if (isNaN(q) || q <= 0) return 1;
+  return q > 99999 ? 99999 : q;
+}
+
+/* 1 → "1" · 0.5 → "0,5" · 0.25 → "0,25" (sem casas inúteis) */
+function fmtQty(v) {
+  var q = Number(v) || 0;
+  if (Math.abs(q - Math.round(q)) < 0.0005) return String(Math.round(q));
+  return q.toFixed(2).replace(/0$/, '').replace('.', ',');
+}
+
 /* ── MÁSCARA MONETÁRIA ──
    O usuário digita só dígitos; o campo formata sozinho da direita pra
    esquerda (1 → 0,01 · 1250 → 12,50 · 132000 → 1.320,00). Substitui o
@@ -752,6 +772,10 @@ function aplicarRecebimento(p, valor, data, forma, aoTerminar) {
       ? 'Recebido ' + fmtBR(valor) + ' · faltam ' + fmtBR(saldo)
       : 'Pagamento quitado!');
     renderPagamentos(); renderPaySummary(); renderPayHome(); atualizarBadgeSino();
+    /* a baixa pode ter saído da tela do orçamento aprovado (ou da lista) —
+       aquelas telas mostram saldo e precisam refletir na hora */
+    if (_orcDetalheId) renderOrcDetalhe();
+    renderListaOrcamentos();
     if (aoTerminar) aoTerminar();
   });
 }
@@ -782,6 +806,8 @@ function desfazerRecebimento(id) {
       persistPut('pagamentos', p, function() {
         showToast('Baixa desfeita.');
         renderPagamentos(); renderPaySummary(); renderPayHome(); atualizarBadgeSino();
+        if (_orcDetalheId) renderOrcDetalhe();
+        renderListaOrcamentos();
       });
     });
     return;
@@ -794,6 +820,8 @@ function desfazerRecebimento(id) {
     persistPut('pagamentos', p, function() {
       showToast('Recebimento desfeito.');
       renderPagamentos(); renderPaySummary(); renderPayHome(); atualizarBadgeSino();
+      if (_orcDetalheId) renderOrcDetalhe();
+      renderListaOrcamentos();
     });
   });
 }
@@ -1682,6 +1710,85 @@ function reagendarTodasNotificacoes() {
    AGENDAMENTOS
    ================================================================ */
 
+/* ── ALARME NO RELÓGIO DO APARELHO (Rota B — docs/PLANO-ALARME-ANDROID.md) ──
+   A notificação exata de 30 min já existe, mas notificação não é alarme:
+   não toca no silencioso e não insiste. Delegar ao app de Relógio do
+   celular dá o comportamento de despertador de graça — mesmo som, mesmo
+   snooze, e o alarme fica visível/editável fora do app.
+
+   Limite duro da API: `AlarmClock.ACTION_SET_ALARM` guarda hora e minuto,
+   NÃO a data — o alarme dispara na próxima vez que o relógio marcar
+   aquele horário. Por isso só é oferecido quando o aviso cai dentro das
+   próximas 24 h; além disso ele tocaria no dia errado, e quem cobre é a
+   notificação exata que já está agendada.
+
+   Criação é manual (botão), nunca automática: alarme que aparece sozinho
+   na lista do Relógio é alarme que o dono não sabe de onde veio. */
+
+var ALARME_ANTECEDENCIA_MIN = 30;
+
+function pluginRelogio() {
+  return (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.EbRelogio) || null;
+}
+
+function _hhmm(d) {
+  return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+}
+
+function _alarmeEm(ag) {
+  return new Date(_dataHoraAg(ag).getTime() - ALARME_ANTECEDENCIA_MIN * 60000);
+}
+
+/* futuro (com folga de 1 min pra não criar um alarme que já passou
+   enquanto a tela era lida) e dentro da janela de 24 h da API */
+function podeAlarmeRelogio(ag) {
+  if (!ag || !pluginRelogio()) return false;
+  var falta = _alarmeEm(ag).getTime() - Date.now();
+  return falta > 60000 && falta < 24 * 3600000;
+}
+
+function criarAlarmeRelogio() {
+  var a = agendamentoById(_agendamentoId);
+  if (!a) return;
+  var P = pluginRelogio();
+  if (!P) { showToast('Disponível só no app Android.'); return; }
+  if (!podeAlarmeRelogio(a)) {
+    showToast('O Relógio do Android guarda só a hora, não a data — vale para compromisso nas próximas 24 h. O aviso de 30 min continua agendado.');
+    return;
+  }
+  var quando = _alarmeEm(a);
+  var titulo = (a.desc && a.desc !== 'Não definido' ? a.desc : 'Compromisso')
+    + (a.cliente ? ' — ' + a.cliente : '');
+
+  showConfirm('Criar um alarme no Relógio do celular para as ' + _hhmm(quando)
+    + ' (30 min antes)?', function() {
+    P.criarAlarme({ hora: quando.getHours(), minuto: quando.getMinutes(),
+                    titulo: titulo, semUi: true })
+      .then(function() {
+        diag('alarme no relógio criado ' + _hhmm(quando));
+        showToast('Alarme criado no Relógio às ' + _hhmm(quando) + '.');
+      })
+      .catch(function(e) {
+        diag('alarme no relógio falhou', e);
+        showToast('Não foi possível criar o alarme: ' + ((e && e.message) || 'erro'));
+      });
+  });
+}
+
+/* Fora da janela de 24 h o botão fica apagado mas CLICÁVEL de propósito:
+   um botão morto não explica por que está morto — o toque mostra o motivo. */
+function atualizarBtnAlarme(a) {
+  var btn = document.getElementById('det-alarme-btn');
+  if (!btn) return;
+  if (!pluginRelogio()) { btn.style.display = 'none'; return; }
+  btn.style.display = 'block';
+  var ok = podeAlarmeRelogio(a);
+  btn.style.opacity = ok ? '1' : '0.45';
+  btn.textContent = ok
+    ? '⏰ ALARME NO RELÓGIO ÀS ' + _hhmm(_alarmeEm(a))
+    : '⏰ ALARME NO RELÓGIO — SÓ ATÉ 24 H ANTES';
+}
+
 function agendamentoById(id) {
   for (var i = 0; i < agendamentos.length; i++) if (agendamentos[i].id === id) return agendamentos[i];
   return null;
@@ -1856,6 +1963,7 @@ function abrirDetalheAgendamento(id) {
   }
   atualizarBtnConcluido(a);
   atualizarBtnNotif(a);
+  atualizarBtnAlarme(a);
   goTo('screen-detalhe-agendamento');
 }
 
@@ -2186,11 +2294,13 @@ function renderMateriais() {
   var activeChip = document.querySelector('#mat-filter-row .filter-chip.active');
   var filtro = activeChip ? (activeChip.getAttribute('data-cat') || activeChip.textContent) : 'TODOS';
 
+  /* ordem alfabética: a lista é consultada procurando um nome, não a
+     ordem em que os materiais foram cadastrados */
   var items = materiais.filter(function(m) {
     var matchCat = filtro === 'TODOS' || m.cat === filtro;
     var matchBusca = !busca || m.nome.toLowerCase().indexOf(busca.toLowerCase()) !== -1;
     return matchCat && matchBusca;
-  });
+  }).sort(function(a, b) { return a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' }); });
 
   if (items.length === 0) {
     list.innerHTML = '<div class="empty-state">Nenhum material encontrado.</div>';
@@ -2821,7 +2931,7 @@ function salvarCliente() {
    ORÇAMENTOS
    ================================================================ */
 
-var orcamentoAtual = { materiais: [], maoDeObra: [] };
+var orcamentoAtual = { materiais: [], maoDeObra: [], fotos: [], desconto: null };
 var _orcEditId = null;
 /* status do orçamento que está sendo editado (null = orçamento novo).
    Editar um já ENVIADO não pode rebaixá-lo pra rascunho nem apagar o
@@ -2834,11 +2944,49 @@ function orcamentoById(id) {
   return null;
 }
 
-/* Total SEMPRE revalidado dos itens (SPEC §4/§8), em centavos exatos */
-function totalOrcamento(o) {
-  var tm = o.materiais.reduce(function(s, m) { return s + round2(m.preco * m.qty); }, 0);
-  var tb = o.maoDeObra.reduce(function(s, m) { return s + Number(m.valor); }, 0);
+/* Subtotal SEMPRE revalidado dos itens (SPEC §4/§8), em centavos exatos */
+function subtotalOrcamento(o) {
+  var tm = (o.materiais || []).reduce(function(s, m) { return s + round2(m.preco * m.qty); }, 0);
+  var tb = (o.maoDeObra || []).reduce(function(s, m) { return s + Number(m.valor); }, 0);
   return round2(tm + tb);
+}
+
+/* ── DESCONTO / ARREDONDAMENTO ──
+   Três modos pro mesmo fim, porque na hora de fechar o preço o raciocínio
+   muda: "tira 50 reais" (valor), "dá 10%" (percent) ou "deixa em 2.500"
+   (final). O modo 'final' guarda o valor CHEIO que se quer cobrar — o
+   abatimento é derivado dele, senão mexer num item depois deixaria o
+   arredondamento desatualizado.
+   Nunca vira acréscimo: o abatimento é travado entre 0 e o subtotal. */
+function descontoOrcamento(o) {
+  var d = o && o.desconto;
+  if (!d || !d.tipo || d.tipo === 'nenhum' || !(Number(d.valor) > 0)) return 0;
+  var sub = subtotalOrcamento(o);
+  var v = Number(d.valor);
+  var abate = d.tipo === 'percent' ? sub * v / 100
+            : d.tipo === 'final'   ? sub - v
+            : v;
+  abate = round2(abate);
+  if (abate < 0) return 0;
+  return abate > sub ? sub : abate;
+}
+
+/* rótulo da linha de desconto — sempre diz quanto foi em % */
+function descontoLabel(o) {
+  var ab = descontoOrcamento(o);
+  if (ab <= 0) return '';
+  var sub = subtotalOrcamento(o);
+  var d = (o && o.desconto) || {};
+  var pct = sub > 0 ? (ab / sub * 100) : 0;
+  var pctTxt = '(' + pct.toFixed(1).replace('.', ',') + '%)';
+  if (d.tipo === 'percent') return 'DESCONTO ' + fmtQty(d.valor) + '%';
+  if (d.tipo === 'final') return 'ARREDONDAMENTO ' + pctTxt;
+  return 'DESCONTO ' + pctTxt;
+}
+
+/* Total = subtotal − desconto. É o valor que vai pro PDF e pro Pagamento. */
+function totalOrcamento(o) {
+  return round2(subtotalOrcamento(o) - descontoOrcamento(o));
 }
 
 /* "Revisão 2 · 19/08/2026" — vazio enquanto o orçamento nunca foi
@@ -2857,11 +3005,13 @@ function resumoOrcamento(o) {
 }
 
 function novoOrcamento() {
-  orcamentoAtual = { materiais: [], maoDeObra: [] };
+  orcamentoAtual = { materiais: [], maoDeObra: [], fotos: [], desconto: null };
   _orcEditId = null;
   _orcEditStatus = null;
+  fecharFormMob();
   document.getElementById('orc-form-title').textContent = 'Novo Orçamento';
   setPickerCliente('orc', '');
+  aplicarDescontoUI();
   document.getElementById('orc-erro').style.display = 'none';
   goTo('screen-orcamento');
 }
@@ -2873,12 +3023,12 @@ function renderOrcamento() {
       matList.innerHTML = '<div style="color:#aaa;font-size:13px;padding:8px 0;">Nenhum material adicionado.</div>';
     } else {
       matList.innerHTML = orcamentoAtual.materiais.map(function(m, i) {
-        var total = (m.preco * m.qty).toFixed(2).replace('.', ',');
+        var total = round2(m.preco * m.qty).toFixed(2).replace('.', ',');
         var preco = m.preco.toFixed(2).replace('.', ',');
         var unit = m.unit === 'metro' ? 'metro' : 'un.';
         return '<div class="orc-item-row">'
           + '<div><div class="orc-item-nome">' + esc(m.nome) + '</div><div class="orc-item-preco">R$ ' + preco + ' / ' + unit + '</div></div>'
-          + '<input class="orc-qty-input" type="number" inputmode="numeric" min="1" max="99999"'
+          + '<input class="orc-qty-input" type="number" inputmode="decimal" step="0.25" min="0.01" max="99999"'
           + ' value="' + m.qty + '" aria-label="Quantidade de ' + esc(m.nome) + '"'
           + ' onchange="alterarQtdMatOrc(' + i + ', this.value)">'
           + '<div class="orc-item-total">R$ ' + total + '</div>'
@@ -2894,14 +3044,17 @@ function renderOrcamento() {
       mobList.innerHTML = '<div style="color:#aaa;font-size:13px;padding:8px 0;">Nenhum item adicionado.</div>';
     } else {
       mobList.innerHTML = orcamentoAtual.maoDeObra.map(function(m, i) {
-        return '<div class="orc-item-row" style="grid-template-columns:1fr 90px 20px;">'
+        return '<div class="orc-item-row" style="grid-template-columns:1fr 78px 22px 20px;">'
           + '<div class="orc-item-nome">' + esc(m.nome) + '</div>'
           + '<div class="orc-item-total">R$ ' + m.valor.toFixed(2).replace('.', ',') + '</div>'
+          + '<div class="orc-item-edit" onclick="editarMobOrc(' + i + ')" role="button" aria-label="Editar ' + esc(m.nome) + '">✎</div>'
           + '<div class="orc-item-x" onclick="removerMobOrc(' + i + ')" role="button" aria-label="Remover item">✕</div>'
           + '</div>';
       }).join('');
     }
   }
+
+  renderFotosOrc();
 
   /* Revisando um enviado: "RASCUNHO" não faz sentido (salvar não rebaixa
      o status) e só confundiria — some, e o botão principal diz o que faz. */
@@ -2911,22 +3064,21 @@ function renderOrcamento() {
   var btnPdf = document.getElementById('orc-btn-pdf');
   if (btnPdf) btnPdf.textContent = revisando ? 'SALVAR REVISÃO' : 'SALVAR PDF';
 
-  var totalMat = orcamentoAtual.materiais.reduce(function(s, m) { return s + m.preco * m.qty; }, 0);
+  var totalMat = orcamentoAtual.materiais.reduce(function(s, m) { return s + round2(m.preco * m.qty); }, 0);
   var totalMob = orcamentoAtual.maoDeObra.reduce(function(s, m) { return s + m.valor; }, 0);
   var el = document.getElementById('orc-total-mat'); if (el) el.textContent = fmtBR(totalMat);
   var el2 = document.getElementById('orc-total-mob'); if (el2) el2.textContent = fmtBR(totalMob);
-  var el3 = document.getElementById('orc-total-geral'); if (el3) el3.textContent = fmtBR(totalMat + totalMob);
+
+  renderDescontoOrc();
 }
 
-/* Edição da qtd direto na linha. Zero/vazio não remove silenciosamente —
-   volta pra 1, porque remover é ação destrutiva e tem confirmação própria. */
+/* Edição da qtd direto na linha. Aceita fração (0,25 / 0,5); zero ou vazio
+   não remove silenciosamente — volta pro mínimo, porque remover é ação
+   destrutiva e tem confirmação própria. */
 function alterarQtdMatOrc(i, valor) {
   var item = orcamentoAtual.materiais[i];
   if (!item) return;
-  var qty = parseInt(valor, 10);
-  if (isNaN(qty) || qty < 1) qty = 1;
-  if (qty > 99999) qty = 99999;
-  item.qty = qty;
+  item.qty = normQty(valor);
   renderOrcamento();
 }
 
@@ -2937,24 +3089,234 @@ function removerMatOrc(i) {
 }
 function removerMobOrc(i) {
   showConfirm('Remover este item de mão de obra?', function() {
-    orcamentoAtual.maoDeObra.splice(i, 1); renderOrcamento();
+    orcamentoAtual.maoDeObra.splice(i, 1);
+    if (_mobEditIdx === i) fecharFormMob();
+    renderOrcamento();
   });
+}
+
+/* ── MÃO DE OBRA: incluir e EDITAR ──
+   O mesmo formulário serve pros dois casos; `_mobEditIdx` diz se o OK
+   grava em cima de um item existente ou empilha um novo. Errar o valor de
+   um serviço já lançado deixa de exigir remover-e-redigitar. */
+
+var _mobEditIdx = null;
+
+function fecharFormMob() {
+  _mobEditIdx = null;
+  var f = document.getElementById('orc-mob-form');
+  if (f) f.style.display = 'none';
+  var t = document.getElementById('orc-mob-form-title');
+  if (t) t.style.display = 'none';
+  var b = document.getElementById('mob-ok-btn');
+  if (b) b.textContent = 'OK';
+  var n = document.getElementById('mob-nome-input'); if (n) n.value = '';
+  var v = document.getElementById('mob-valor-input'); if (v) v.value = '';
 }
 
 function toggleFormMob() {
   var f = document.getElementById('orc-mob-form');
-  f.style.display = f.style.display === 'none' ? 'block' : 'none';
+  if (!f) return;
+  /* form aberto para inclusão: o botão fecha. Aberto em edição: troca
+     pro modo de inclusão em vez de sumir sem explicação. */
+  if (f.style.display !== 'none' && _mobEditIdx === null) { fecharFormMob(); return; }
+  fecharFormMob();
+  f.style.display = 'block';
+  var n = document.getElementById('mob-nome-input');
+  if (n) n.focus();
+}
+
+function editarMobOrc(i) {
+  var m = orcamentoAtual.maoDeObra[i];
+  if (!m) return;
+  fecharFormMob();
+  _mobEditIdx = i;
+  document.getElementById('mob-nome-input').value = m.nome;
+  document.getElementById('mob-valor-input').value = numeroParaMoeda(m.valor);
+  var f = document.getElementById('orc-mob-form');
+  if (f) f.style.display = 'block';
+  var t = document.getElementById('orc-mob-form-title');
+  if (t) { t.style.display = 'block'; t.textContent = 'EDITANDO: ' + m.nome; }
+  var b = document.getElementById('mob-ok-btn');
+  if (b) b.textContent = 'SALVAR';
+  document.getElementById('mob-nome-input').focus();
 }
 
 function adicionarMobOrc() {
   var nome = document.getElementById('mob-nome-input').value.trim();
   var valor = moedaParaNumero(document.getElementById('mob-valor-input').value);
   if (!nome || isNaN(valor) || valor <= 0) return;
-  orcamentoAtual.maoDeObra.push({ nome: nome, valor: valor });
-  document.getElementById('mob-nome-input').value = '';
-  document.getElementById('mob-valor-input').value = '';
-  document.getElementById('orc-mob-form').style.display = 'none';
+  if (_mobEditIdx !== null && orcamentoAtual.maoDeObra[_mobEditIdx]) {
+    orcamentoAtual.maoDeObra[_mobEditIdx] = { nome: nome, valor: round2(valor) };
+  } else {
+    orcamentoAtual.maoDeObra.push({ nome: nome, valor: round2(valor) });
+  }
+  fecharFormMob();
   renderOrcamento();
+}
+
+/* ── FOTOS ANEXAS AO ORÇAMENTO ──
+   Notas de compra de material pego fora do estoque entram como anexo do
+   PDF. Ficam DENTRO do orçamento (`o.fotos`), não num store à parte: a
+   geração do PDF é síncrona, e backup/exclusão do orçamento já levam as
+   fotos junto sem código extra. Em troca, cada foto é reduzida a
+   FOTO_LADO px e recomprimida em JPEG (~100 KB), com teto de MAX_FOTOS. */
+
+var MAX_FOTOS = 8;
+var FOTO_LADO = 1000;
+
+function fotosOrc() {
+  if (!Array.isArray(orcamentoAtual.fotos)) orcamentoAtual.fotos = [];
+  return orcamentoAtual.fotos;
+}
+
+function comprimirFoto(file, cb) {
+  var reader = new FileReader();
+  reader.onerror = function() { cb(null); };
+  reader.onload = function() {
+    var img = new Image();
+    img.onerror = function() { cb(null); };
+    img.onload = function() {
+      var escala = Math.min(1, FOTO_LADO / Math.max(img.width, img.height));
+      var w = Math.max(1, Math.round(img.width * escala));
+      var h = Math.max(1, Math.round(img.height * escala));
+      try {
+        var cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        var ctx = cv.getContext('2d');
+        /* fundo branco: JPEG não tem alfa e um PNG transparente sairia preto */
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        cb({ id: novoId(), nome: file.name || 'foto.jpg', w: w, h: h,
+             dataUrl: cv.toDataURL('image/jpeg', 0.62) });
+      } catch (e) { console.error('comprimirFoto', e); cb(null); }
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function adicionarFotosOrc(input) {
+  var arquivos = Array.prototype.slice.call(input.files || []);
+  input.value = '';                       /* permite reanexar o mesmo arquivo */
+  if (!arquivos.length) return;
+  var livres = MAX_FOTOS - fotosOrc().length;
+  if (livres <= 0) { showToast('Limite de ' + MAX_FOTOS + ' fotos por orçamento.'); return; }
+  var cortou = arquivos.length > livres;
+  arquivos = arquivos.slice(0, livres);
+
+  var n = arquivos.length, pendentes = n, falhas = 0;
+  arquivos.forEach(function(f) {
+    comprimirFoto(f, function(foto) {
+      if (foto) fotosOrc().push(foto); else falhas++;
+      if (--pendentes > 0) return;
+      renderFotosOrc();
+      if (falhas) showToast(falhas + ' arquivo(s) não puderam ser lidos.');
+      else if (cortou) showToast('Só cabem ' + MAX_FOTOS + ' fotos — as demais foram ignoradas.');
+      else showToast(n + (n === 1 ? ' foto anexada.' : ' fotos anexadas.'));
+    });
+  });
+}
+
+function removerFotoOrc(i) {
+  showConfirm('Remover esta foto do orçamento?', function() {
+    fotosOrc().splice(i, 1);
+    renderFotosOrc();
+  });
+}
+
+function renderFotosOrc() {
+  var box = document.getElementById('orc-fotos-list');
+  if (!box) return;
+  var fs = fotosOrc();
+  var cont = document.getElementById('orc-fotos-count');
+  if (cont) cont.textContent = fs.length ? '(' + fs.length + '/' + MAX_FOTOS + ')' : '';
+  box.innerHTML = fs.length === 0
+    ? '<div style="color:#aaa;font-size:13px;padding:8px 0;">Nenhuma foto anexada.</div>'
+    : fs.map(function(f, i) {
+        return '<div class="foto-thumb">'
+          + '<img src="' + f.dataUrl + '" alt="' + esc(f.nome) + '"/>'
+          + '<button type="button" class="foto-del" onclick="removerFotoOrc(' + i + ')" aria-label="Remover foto">✕</button>'
+          + '</div>';
+      }).join('');
+}
+
+/* ── UI DO DESCONTO ── */
+
+function descontoTipoUI() {
+  var el = document.querySelector('#orc-desc-row .filter-chip.active');
+  return (el && el.getAttribute('data-tipo')) || 'nenhum';
+}
+
+/* lê os controles e devolve o objeto que vai pro orçamento (ou null) */
+function lerDescontoUI() {
+  var tipo = descontoTipoUI();
+  var campo = document.getElementById('orc-desc-input');
+  if (tipo === 'nenhum' || !campo) return null;
+  var v = tipo === 'percent'
+    ? parseFloat(String(campo.value).replace(',', '.'))
+    : moedaParaNumero(campo.value);
+  if (isNaN(v) || v <= 0) return null;
+  if (tipo === 'percent' && v > 100) v = 100;
+  return { tipo: tipo, valor: round2(v) };
+}
+
+/* caminho inverso: joga o desconto salvo de volta nos controles */
+function aplicarDescontoUI() {
+  var d = orcamentoAtual.desconto;
+  var tipo = (d && d.tipo) || 'nenhum';
+  document.querySelectorAll('#orc-desc-row .filter-chip').forEach(function(c) {
+    c.classList.toggle('active', c.getAttribute('data-tipo') === tipo);
+  });
+  var campo = document.getElementById('orc-desc-input');
+  if (campo) campo.value = !d ? '' : (d.tipo === 'percent' ? fmtQty(d.valor) : numeroParaMoeda(d.valor));
+}
+
+function setDescontoTipo(el) {
+  document.querySelectorAll('#orc-desc-row .filter-chip').forEach(function(c) { c.classList.remove('active'); });
+  el.classList.add('active');
+  /* trocar de modo carregando o número digitado herdaria o valor errado
+     (10% viraria R$ 10,00) — zera o campo e recomeça */
+  var campo = document.getElementById('orc-desc-input');
+  if (campo) campo.value = '';
+  orcamentoAtual.desconto = null;
+  renderDescontoOrc();
+  if (campo && descontoTipoUI() !== 'nenhum') campo.focus();
+}
+
+function onDescontoInput(input) {
+  if (descontoTipoUI() === 'percent') {
+    input.value = input.value.replace(/[^0-9.,]/g, '').slice(0, 5);
+  } else {
+    mascaraMoeda(input);
+  }
+  orcamentoAtual.desconto = lerDescontoUI();
+  renderDescontoOrc();
+}
+
+function renderDescontoOrc() {
+  var tipo = descontoTipoUI();
+  var wrap = document.getElementById('orc-desc-campo');
+  if (wrap) wrap.style.display = tipo === 'nenhum' ? 'none' : 'block';
+  var campo = document.getElementById('orc-desc-input');
+  if (campo) {
+    campo.placeholder = tipo === 'percent' ? '% de desconto'
+      : tipo === 'final' ? 'Valor final a cobrar (R$)' : 'Desconto em R$';
+    campo.setAttribute('inputmode', tipo === 'percent' ? 'decimal' : 'numeric');
+  }
+
+  var sub = subtotalOrcamento(orcamentoAtual);
+  var ab = descontoOrcamento(orcamentoAtual);
+  var elSub = document.getElementById('orc-subtotal'); if (elSub) elSub.textContent = fmtBR(sub);
+  var linha = document.getElementById('orc-desc-linha');
+  if (linha) {
+    linha.style.display = ab > 0 ? 'flex' : 'none';
+    var lbl = document.getElementById('orc-desc-label');
+    var val = document.getElementById('orc-desc-valor');
+    if (lbl) lbl.textContent = descontoLabel(orcamentoAtual);
+    if (val) val.textContent = '- ' + fmtBR(ab);
+  }
+  var el3 = document.getElementById('orc-total-geral'); if (el3) el3.textContent = fmtBR(round2(sub - ab));
 }
 
 /* ── PICKER DE CLIENTE ──
@@ -3119,10 +3481,10 @@ function renderPickerMaterial() {
     return '<div class="mat-row" style="align-items:center;cursor:default;">'
       + '<div><div class="mat-nome">' + esc(m.nome) + '</div><div class="mat-unit">' + preco + ' / ' + unit
       + (m.cat ? ' · ' + esc(m.cat) : '')
-      + (noOrc ? ' · <span style="color:#15803d;">' + noOrc + ' no orçamento</span>' : '')
+      + (noOrc ? ' · <span style="color:#15803d;">' + fmtQty(noOrc) + (m.unit === 'metro' ? ' m' : '') + ' no orçamento</span>' : '')
       + '</div></div>'
       + '<div style="display:flex;align-items:center;gap:6px;">'
-      + '<input id="pqty-' + m.id + '" type="number" min="1" max="99999" value="1" aria-label="Quantidade de ' + esc(m.nome) + '" style="width:50px;padding:4px 6px;border:1.5px solid #d0d0d0;border-radius:6px;font-size:13px;text-align:center;">'
+      + '<input id="pqty-' + m.id + '" type="number" inputmode="decimal" step="0.25" min="0.01" max="99999" value="1" aria-label="Quantidade de ' + esc(m.nome) + '" style="width:58px;padding:4px 6px;border:1.5px solid #d0d0d0;border-radius:6px;font-size:13px;text-align:center;">'
       + '<button onclick="adicionarMatOrc(\'' + m.id + '\')" aria-label="Adicionar ' + esc(m.nome) + ' ao orçamento" style="background:#1e3a5f;color:#fff;border:none;border-radius:6px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;">ADD</button>'
       + '</div></div>';
   }).join('');
@@ -3133,11 +3495,10 @@ function adicionarMatOrc(id) {
   var m = materialById(id);
   if (!m) return;
   var qtyEl = document.getElementById('pqty-' + id);
-  var qty = parseInt(qtyEl ? qtyEl.value : 1, 10);
-  if (isNaN(qty) || qty <= 0) qty = 1;
+  var qty = normQty(qtyEl ? qtyEl.value : 1);
   var existing = null;
   orcamentoAtual.materiais.forEach(function(x) { if (x.materialId === id) existing = x; });
-  if (existing) { existing.qty += qty; }
+  if (existing) { existing.qty = round2(existing.qty + qty); }
   else { orcamentoAtual.materiais.push({ materialId: m.id, nome: m.nome, unit: m.unit, preco: m.preco, qty: qty }); }
   if (qtyEl) qtyEl.value = 1;
   goTo('screen-orcamento');
@@ -3326,7 +3687,7 @@ function gerarPdfOrcamento(o, nomeForcado) {
       quebraPagina(6);
       doc.setFont('helvetica', 'normal');
       doc.text(String(m.nome).slice(0, 55), M, y);
-      doc.text(String(m.qty), 130, y, { align: 'right' });
+      doc.text(fmtQty(m.qty) + (m.unit === 'metro' ? ' m' : ''), 130, y, { align: 'right' });
       doc.text(moedaPdf(m.preco), 160, y, { align: 'right' });
       doc.setFont('helvetica', 'bold');
       doc.text(moedaPdf(m.preco * m.qty), W - M, y, { align: 'right' });
@@ -3354,10 +3715,14 @@ function gerarPdfOrcamento(o, nomeForcado) {
   /* totais — sempre revalidados dos itens (§8) */
   var totalMat = o.materiais.reduce(function(s, m) { return s + m.preco * m.qty; }, 0);
   var totalMob = o.maoDeObra.reduce(function(s, m) { return s + m.valor; }, 0);
-  quebraPagina(30);
+  var subtotal = round2(totalMat + totalMob);
+  var abatimento = descontoOrcamento(o);
+  /* o desconto ocupa duas linhas a mais na caixa (a dele e a do subtotal) */
+  var altura = abatimento > 0 ? 37 : 24;
+  quebraPagina(altura + 6);
   doc.setFillColor(248, 250, 252);
   doc.setDrawColor(226, 232, 240);
-  doc.rect(M, y, W - 2 * M, 24, 'FD');
+  doc.rect(M, y, W - 2 * M, altura, 'FD');
   var yt = y + 7;
   doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
   doc.setTextColor(85, 85, 85);
@@ -3366,17 +3731,58 @@ function gerarPdfOrcamento(o, nomeForcado) {
   yt += 6;
   doc.text('MÃO DE OBRA', M + 5, yt);
   doc.text(moedaPdf(totalMob), W - M - 5, yt, { align: 'right' });
+  if (abatimento > 0) {
+    yt += 6;
+    doc.text('SUBTOTAL', M + 5, yt);
+    doc.text(moedaPdf(subtotal), W - M - 5, yt, { align: 'right' });
+    yt += 6;
+    /* o abatimento aparece explícito: o cliente precisa ver o quanto
+       ganhou, senão o total menor vira dúvida sobre a conta */
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(21, 128, 61);
+    doc.text(descontoLabel(o), M + 5, yt);
+    doc.text('- ' + moedaPdf(abatimento), W - M - 5, yt, { align: 'right' });
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(85, 85, 85);
+  }
   yt += 7;
   doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
   doc.setTextColor(navy[0], navy[1], navy[2]);
   doc.text('TOTAL', M + 5, yt);
-  doc.text(moedaPdf(totalMat + totalMob), W - M - 5, yt, { align: 'right' });
+  doc.text(moedaPdf(round2(subtotal - abatimento)), W - M - 5, yt, { align: 'right' });
 
   /* rodapé */
   doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
   doc.setTextColor(150, 150, 150);
   doc.text('Gerado pelo Electric Budget em ' + hojeLocal().split('-').reverse().join('/')
     + (o.rev ? '  ·  Revisão ' + o.rev : ''), M, 290);
+
+  /* ── ANEXOS ──
+     Uma foto por página, no maior tamanho que couber na área útil: são
+     notas fiscais, e miniatura ilegível não comprova compra nenhuma. */
+  var fotos = Array.isArray(o.fotos) ? o.fotos : [];
+  fotos.forEach(function(f, i) {
+    doc.addPage();
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
+    doc.setTextColor(navy[0], navy[1], navy[2]);
+    doc.text('ANEXO ' + (i + 1) + ' DE ' + fotos.length + ' — COMPROVANTE DE COMPRA', M, 20);
+    doc.setDrawColor(220, 210, 190);
+    doc.line(M, 23, W - M, 23);
+    var maxW = W - 2 * M, maxH = 248;
+    var fator = Math.min(maxW / (f.w || 1), maxH / (f.h || 1));
+    var iw = (f.w || 1) * fator, ih = (f.h || 1) * fator;
+    try {
+      doc.addImage(f.dataUrl, 'JPEG', M + (maxW - iw) / 2, 30, iw, ih);
+    } catch (e) {
+      console.error('anexo pdf', e);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+      doc.setTextColor(150, 150, 150);
+      doc.text('(imagem não pôde ser incorporada)', M, 40);
+    }
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
+    doc.setTextColor(150, 150, 150);
+    doc.text(String(f.nome || '').slice(0, 80), M, 290);
+  });
 
   var nomeArq = 'orcamento-' + (c ? c.nome : 'cliente')
     .toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
@@ -3412,6 +3818,10 @@ function saveOrcamento(status, gerarPdf) {
   }
   erro.style.display = 'none';
 
+  /* o desconto vive nos controles até aqui: relê antes de gravar pra não
+     perder o que foi digitado e não confirmado com um blur */
+  orcamentoAtual.desconto = lerDescontoUI();
+
   var existente = _orcEditId ? orcamentoById(_orcEditId) : null;
   var jaSaiuDeRascunho = !!(existente && existente.status !== 'rascunho');
 
@@ -3423,6 +3833,8 @@ function saveOrcamento(status, gerarPdf) {
     status: jaSaiuDeRascunho ? existente.status : status,
     materiais: orcamentoAtual.materiais,
     maoDeObra: orcamentoAtual.maoDeObra,
+    fotos: fotosOrc(),
+    desconto: orcamentoAtual.desconto || null,
     rev: (existente && existente.rev) || 0,
     editadoEm: (existente && existente.editadoEm) || null,
     total: 0
@@ -3450,8 +3862,10 @@ function saveOrcamento(status, gerarPdf) {
       ? (pdfOk ? 'Revisão ' + orc.rev + ' salva — PDF gerado!' : 'Revisão ' + orc.rev + ' salva!')
       : (orc.status === 'rascunho' ? 'Rascunho salvo!'
         : (pdfOk ? 'Orçamento salvo — PDF gerado!' : 'Orçamento salvo!')));
-    orcamentoAtual = { materiais: [], maoDeObra: [] };
+    orcamentoAtual = { materiais: [], maoDeObra: [], fotos: [], desconto: null };
+    fecharFormMob();
     setPickerCliente('orc', '');
+    aplicarDescontoUI();
     goTo('screen-home');
   });
 }
@@ -3490,15 +3904,27 @@ function renderListaOrcamentos() {
 
   list.innerHTML = items.map(function(o) {
     var dataFmt = o.data.split('-').reverse().join('/');
+    /* aprovado já tem cobrança (§8.1): a lista mostra o quanto falta e
+       abre a baixa direto, sem obrigar a passar pela tela de Pagamentos */
+    var pg = o.status === 'aprovado' ? pagamentoDoOrcamento(o.id) : null;
+    var emAberto = pg ? saldoPagamento(pg) : 0;
+    var pagTxt = !pg ? ''
+      : (emAberto > EPS
+          ? ' · <span style="color:#b45309;font-weight:700;">FALTA ' + fmtBR(emAberto) + '</span>'
+          : ' · <span style="color:#15803d;font-weight:700;">PAGO</span>');
     return '<div class="orc-hist-row" onclick="abrirOrcDetalhe(\'' + o.id + '\')">'
       + '<div class="orc-hist-left">'
       + '<div class="orc-hist-nome">' + esc(clienteNome(o.clienteId)) + '</div>'
       + '<div class="orc-hist-data">' + esc(resumoOrcamento(o)) + ' · ' + dataFmt
-      + (o.rev ? ' · rev ' + o.rev : '') + '</div>'
+      + (o.rev ? ' · rev ' + o.rev : '') + pagTxt + '</div>'
       + '</div>'
       + '<div class="orc-hist-right">'
       + '<span class="orc-hist-val">' + fmtBR(o.total) + '</span>'
       + '<span class="orc-hist-badge ' + o.status + '">' + (_orcStatusBadge[o.status] || o.status.toUpperCase()) + '</span>'
+      + (pg && emAberto > EPS
+          ? '<button class="orc-pay-btn" aria-label="Registrar pagamento" '
+            + 'onclick="event.stopPropagation();abrirReceber(\'' + pg.id + '\')">R$</button>'
+          : '')
       + '<button class="ag-del-btn" aria-label="Excluir orçamento" '
       + 'onclick="event.stopPropagation();excluirOrcamentoDaLista(\'' + o.id + '\')">✕</button>'
       + '</div></div>';
@@ -3552,8 +3978,8 @@ function renderOrcDetalhe() {
         var unit = m.unit === 'metro' ? 'metro' : 'un.';
         return '<div class="orc-item-row">'
           + '<div><div class="orc-item-nome">' + esc(m.nome) + '</div><div class="orc-item-preco">R$ ' + m.preco.toFixed(2).replace('.', ',') + ' / ' + unit + '</div></div>'
-          + '<div class="orc-item-qty">' + m.qty + '</div>'
-          + '<div class="orc-item-total">R$ ' + (m.preco * m.qty).toFixed(2).replace('.', ',') + '</div>'
+          + '<div class="orc-item-qty">' + fmtQty(m.qty) + '</div>'
+          + '<div class="orc-item-total">R$ ' + round2(m.preco * m.qty).toFixed(2).replace('.', ',') + '</div>'
           + '<div></div>'
           + '</div>';
       }).join('');
@@ -3569,11 +3995,24 @@ function renderOrcDetalhe() {
           + '</div>';
       }).join('');
 
-  var tm = o.materiais.reduce(function(s, m) { return s + m.preco * m.qty; }, 0);
+  var tm = o.materiais.reduce(function(s, m) { return s + round2(m.preco * m.qty); }, 0);
   var tb = o.maoDeObra.reduce(function(s, m) { return s + m.valor; }, 0);
+  var sub = subtotalOrcamento(o);
+  var abat = descontoOrcamento(o);
   document.getElementById('od-total-mat').textContent = fmtBR(tm);
   document.getElementById('od-total-mob').textContent = fmtBR(tb);
-  document.getElementById('od-total-geral').textContent = fmtBR(tm + tb);
+  var odSub = document.getElementById('od-subtotal');
+  if (odSub) odSub.textContent = fmtBR(sub);
+  var odDesc = document.getElementById('od-desc-linha');
+  if (odDesc) {
+    odDesc.style.display = abat > 0 ? 'flex' : 'none';
+    document.getElementById('od-desc-label').textContent = descontoLabel(o);
+    document.getElementById('od-desc-valor').textContent = '- ' + fmtBR(abat);
+  }
+  document.getElementById('od-total-geral').textContent = fmtBR(round2(sub - abat));
+
+  renderFotosDetalhe(o);
+  renderPagamentoDetalhe(o);
 
   /* Ação primária governada pelo status (SPEC §8/§8.1) */
   var btns = document.getElementById('od-btns');
@@ -3585,10 +4024,91 @@ function renderOrcDetalhe() {
       + '<button class="dual-btn" style="color:#ef4444;border-color:#ef4444;" onclick="recusarOrcamento()">RECUSAR</button>'
       + '<button class="dual-btn primary" onclick="aprovarOrcamento()">APROVAR</button>';
   } else if (o.status === 'aprovado') {
-    btns.innerHTML = '<button class="dual-btn primary" style="flex:1;" onclick="pdfDoDetalhe()">GERAR PDF</button>';
+    var pg = pagamentoDoOrcamento(o.id);
+    btns.innerHTML = '<button class="dual-btn" onclick="pdfDoDetalhe()">GERAR PDF</button>'
+      + (!pg ? ''
+         : (saldoPagamento(pg) > EPS
+             ? '<button class="dual-btn primary" onclick="receberDoOrcamento()">RECEBER</button>'
+             : '<button class="dual-btn primary" onclick="verRecibo(\'' + pg.id + '\')">VER RECIBO</button>'));
   } else {
     btns.innerHTML = '<div class="empty-state" style="flex:1;padding:4px 0;">Orçamento recusado — somente leitura.</div>';
   }
+}
+
+/* ── FOTOS E PAGAMENTO NO DETALHE ── */
+
+/* Cobrança nascida deste orçamento. Um orçamento gera no máximo um
+   pagamento (§8.1), então o primeiro encontrado é o certo. */
+function pagamentoDoOrcamento(orcId) {
+  for (var i = 0; i < pagamentos.length; i++) {
+    if (pagamentos[i].orcamentoId === orcId) return pagamentos[i];
+  }
+  return null;
+}
+
+function renderFotosDetalhe(o) {
+  var sec = document.getElementById('od-fotos-sec');
+  var box = document.getElementById('od-fotos-list');
+  if (!sec || !box) return;
+  var fs = Array.isArray(o.fotos) ? o.fotos : [];
+  sec.style.display = fs.length ? 'block' : 'none';
+  box.innerHTML = fs.map(function(f) {
+    return '<div class="foto-thumb"><img src="' + f.dataUrl + '" alt="' + esc(f.nome) + '"/></div>';
+  }).join('');
+}
+
+/* Situação da cobrança dentro do próprio orçamento: quem aprovou acabou
+   de combinar o valor, e ter que procurar o mesmo registro na tela de
+   Pagamentos pra dar baixa era o passo perdido. */
+function renderPagamentoDetalhe(o) {
+  var box = document.getElementById('od-pagamento');
+  if (!box) return;
+  var p = o.status === 'aprovado' ? pagamentoDoOrcamento(o.id) : null;
+  if (!p) { box.style.display = 'none'; box.innerHTML = ''; return; }
+
+  var st = statusPagamento(p);
+  var saldo = saldoPagamento(p);
+  var rotulo = st === 'pago' ? 'QUITADO'
+    : (ehParcial(p) ? 'PARCIAL' : (st === 'atrasado' ? 'ATRASADO' : 'PENDENTE'));
+  var classe = st === 'pago' ? 'pago' : (ehParcial(p) ? 'parcial' : st);
+  var recs = recebimentosDe(p);
+
+  box.style.display = 'block';
+  box.innerHTML = '<div class="form-section-label" style="margin-bottom:8px;">PAGAMENTO</div>'
+    + '<div class="orc-totals-box">'
+    + '<div class="orc-total-row"><span>SITUAÇÃO</span>'
+    + '<span class="status-badge ' + classe + '">' + rotulo + '</span></div>'
+    + '<div class="orc-total-row"><span>COMBINADO</span><span>' + fmtBR(p.valor) + '</span></div>'
+    + '<div class="orc-total-row"><span>RECEBIDO</span><span>' + fmtBR(totalRecebido(p)) + '</span></div>'
+    + (p.dataVencimento
+        ? '<div class="orc-total-row"><span>VENCIMENTO</span><span>'
+          + p.dataVencimento.split('-').reverse().join('/') + '</span></div>'
+        : '')
+    + '<div class="orc-total-row total-main"><span>' + (saldo > EPS ? 'FALTA' : 'QUITADO')
+    + '</span><span>' + fmtBR(saldo) + '</span></div>'
+    + '</div>'
+    + (recs.length
+        ? '<div class="od-rec-list">' + recs.map(function(r) {
+            return '<div class="orc-total-row"><span>'
+              + String(r.data || '').split('-').reverse().join('/')
+              + (r.forma ? ' · ' + esc(r.forma) : '') + '</span><span>'
+              + fmtBR(r.valor) + '</span></div>';
+          }).join('')
+          + (saldo <= EPS ? ''
+             : '<div class="orc-total-row" style="justify-content:flex-end;">'
+               + '<span class="od-desfazer" onclick="desfazerRecebimento(\'' + p.id + '\')" role="button">desfazer último</span></div>')
+          + '</div>'
+        : '');
+}
+
+/* Abre a mesma baixa da tela de Pagamentos (parcial ou total) */
+function receberDoOrcamento() {
+  var o = orcamentoById(_orcDetalheId);
+  if (!o) return;
+  var p = pagamentoDoOrcamento(o.id);
+  if (!p) { showToast('Este orçamento não tem cobrança vinculada.'); return; }
+  if (saldoPagamento(p) <= EPS) { showToast('Pagamento já quitado.'); return; }
+  abrirReceber(p.id);
 }
 
 /* Excluir orçamento — permitido em qualquer status.
@@ -3670,12 +4190,16 @@ function editarOrcamento() {
     _orcEditStatus = o.status;
     orcamentoAtual = {
       materiais: o.materiais.map(function(m) { return Object.assign({}, m); }),
-      maoDeObra: o.maoDeObra.map(function(m) { return Object.assign({}, m); })
+      maoDeObra: o.maoDeObra.map(function(m) { return Object.assign({}, m); }),
+      fotos: (o.fotos || []).map(function(f) { return Object.assign({}, f); }),
+      desconto: o.desconto ? Object.assign({}, o.desconto) : null
     };
+    fecharFormMob();
     document.getElementById('orc-form-title').textContent =
       o.status === 'enviado' ? 'Revisar Orçamento' : 'Editar Orçamento';
     document.getElementById('orc-erro').style.display = 'none';
     setPickerCliente('orc', o.clienteId);
+    aplicarDescontoUI();
     goTo('screen-orcamento');
   };
   if (o.status === 'enviado') {

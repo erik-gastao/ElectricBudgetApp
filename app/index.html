@@ -308,19 +308,43 @@
 <button type="button" class="btn-adicionar" onclick="toggleFormMob()" aria-label="Adicionar mão de obra ao orçamento"><span class="btn-adicionar-mais" aria-hidden="true">+</span> ADICIONAR SERVIÇO</button>
 </div>
 <div id="orc-mob-form" style="display:none;margin-bottom:10px;">
+<div id="orc-mob-form-title" style="display:none;font-size:11px;font-weight:800;color:var(--brand-dark);letter-spacing:.4px;margin-bottom:5px;"></div>
 <input id="mob-nome-input" class="field-input" placeholder="Ex: Instalação de quadro" type="text" maxlength="120" style="margin-bottom:6px;"/>
 <div style="display:flex;gap:8px;align-items:center;">
 <input id="mob-valor-input" class="field-input" placeholder="Valor R$" type="text" inputmode="numeric" maxlength="14" oninput="mascaraMoeda(this)" style="flex:1;"/>
-<button onclick="adicionarMobOrc()" style="background:#1e3a5f;color:#fff;border:none;border-radius:8px;padding:9px 14px;font-weight:700;font-size:13px;cursor:pointer;">OK</button>
+<button id="mob-ok-btn" onclick="adicionarMobOrc()" style="background:#1e3a5f;color:#fff;border:none;border-radius:8px;padding:9px 14px;font-weight:700;font-size:13px;cursor:pointer;">OK</button>
+<button type="button" onclick="fecharFormMob()" aria-label="Cancelar" style="background:#fff;color:#6b5a46;border:1.5px solid #e5d4b8;border-radius:8px;padding:9px 12px;font-weight:700;font-size:13px;cursor:pointer;">✕</button>
 </div>
 </div>
 <div class="orc-items-scroll">
 <div id="orc-mob-list"></div>
 </div>
 </div>
+<div class="form-section">
+<div class="form-section-head">
+<span class="form-section-label">FOTOS / NOTAS <span id="orc-fotos-count" style="color:#999;"></span></span>
+<button type="button" class="btn-adicionar" onclick="document.getElementById('orc-fotos-input').click()" aria-label="Anexar foto ao orçamento"><span class="btn-adicionar-mais" aria-hidden="true">+</span> ANEXAR FOTO</button>
+</div>
+<input id="orc-fotos-input" type="file" accept="image/*" multiple onchange="adicionarFotosOrc(this)" style="display:none;"/>
+<div id="orc-fotos-list" class="foto-grid"></div>
+</div>
+<div class="form-section">
+<div class="form-section-label" style="margin-bottom:8px;">DESCONTO / ARREDONDAMENTO</div>
+<div class="filter-row" id="orc-desc-row" style="margin-bottom:0;">
+<div class="filter-chip active" data-tipo="nenhum" onclick="setDescontoTipo(this)">NENHUM</div>
+<div class="filter-chip" data-tipo="valor" onclick="setDescontoTipo(this)">R$</div>
+<div class="filter-chip" data-tipo="percent" onclick="setDescontoTipo(this)">%</div>
+<div class="filter-chip" data-tipo="final" onclick="setDescontoTipo(this)">VALOR FINAL</div>
+</div>
+<div id="orc-desc-campo" style="display:none;margin-top:8px;">
+<input id="orc-desc-input" class="field-input" type="text" inputmode="numeric" maxlength="14" placeholder="Desconto em R$" oninput="onDescontoInput(this)"/>
+</div>
+</div>
 <div class="orc-totals-box">
 <div class="orc-total-row"><span>MATERIAIS</span><span id="orc-total-mat">R$ 0,00</span></div>
 <div class="orc-total-row"><span>MÃO DE OBRA</span><span id="orc-total-mob">R$ 0,00</span></div>
+<div class="orc-total-row"><span>SUBTOTAL</span><span id="orc-subtotal">R$ 0,00</span></div>
+<div class="orc-total-row desconto" id="orc-desc-linha" style="display:none;"><span id="orc-desc-label">DESCONTO</span><span id="orc-desc-valor">- R$ 0,00</span></div>
 <div class="orc-total-row total-main"><span>TOTAL</span><span id="orc-total-geral">R$ 0,00</span></div>
 </div>
 <div id="orc-erro" style="display:none;color:#ef4444;font-size:12px;margin-top:10px;font-weight:600;"></div>
@@ -453,6 +477,7 @@
 <button class="full-btn" style="margin-top:16px;background:var(--ink);box-shadow:none;" onclick="criarOrcamentoDoCompromisso()">CRIAR ORÇAMENTO</button>
 <button id="det-concluido-btn" class="full-btn" style="margin-top:10px;" onclick="toggleConcluidoAgendamento()"></button>
 <button id="det-notif-btn" class="full-btn" style="margin-top:10px;background:var(--ink-light);box-shadow:none;display:none;" onclick="toggleNotifAgendamento()"></button>
+<button id="det-alarme-btn" class="full-btn" style="margin-top:10px;background:var(--ink-light);box-shadow:none;display:none;" onclick="criarAlarmeRelogio()"></button>
 <div style="height:16px;"></div>
 </div>
 <div class="dual-btns">
@@ -638,11 +663,18 @@
 <div class="form-section-label" style="margin-bottom:8px;">MÃO DE OBRA</div>
 <div id="od-mob-list"></div>
 </div>
+<div class="form-section" id="od-fotos-sec" style="display:none;">
+<div class="form-section-label" style="margin-bottom:8px;">FOTOS / NOTAS</div>
+<div id="od-fotos-list" class="foto-grid"></div>
+</div>
 <div class="orc-totals-box">
 <div class="orc-total-row"><span>MATERIAIS</span><span id="od-total-mat">R$ 0,00</span></div>
 <div class="orc-total-row"><span>MÃO DE OBRA</span><span id="od-total-mob">R$ 0,00</span></div>
+<div class="orc-total-row"><span>SUBTOTAL</span><span id="od-subtotal">R$ 0,00</span></div>
+<div class="orc-total-row desconto" id="od-desc-linha" style="display:none;"><span id="od-desc-label">DESCONTO</span><span id="od-desc-valor">- R$ 0,00</span></div>
 <div class="orc-total-row total-main"><span>TOTAL</span><span id="od-total-geral">R$ 0,00</span></div>
 </div>
+<div class="form-section" id="od-pagamento" style="display:none;"></div>
 <button class="excluir-btn" onclick="excluirOrcamento()">EXCLUIR ORÇAMENTO</button>
 <div style="height:16px;"></div>
 </div>
