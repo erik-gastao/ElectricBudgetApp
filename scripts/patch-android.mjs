@@ -5,7 +5,7 @@
    cada build (`npx cap add android`). Qualquer ajuste no manifest ou
    no build.gradle precisa ser reaplicado por aqui, senão some.
 
-   Faz três coisas:
+   Faz cinco coisas:
    1. Permissões (contatos, notificações, alarme exato, armazenamento) + package
       visibility (Android 11+), sem as quais `@capacitor-community/contacts`
       falha ao ler a agenda, o AppLauncher não abre o app de Contatos e o
@@ -15,7 +15,11 @@
    3. Ícone das notificações na barra de status. Sem um drawable próprio o
       @capacitor/local-notifications cai no ícone padrão do sistema — o
       círculo com "i".
-   4. Assinatura de release a partir de um keystore fixo. Sem isso o CI
+   4. Plugin nativo `EbRelogio` (Java) + registro no MainActivity: cria um
+      alarme de verdade no app de Relógio do aparelho via
+      AlarmClock.ACTION_SET_ALARM. Fica aqui porque `android/` é recriado a
+      cada build — ver docs/PLANO-ALARME-ANDROID.md §8.
+   5. Assinatura de release a partir de um keystore fixo. Sem isso o CI
       assina com o keystore de debug efêmero do runner — assinatura
       diferente a cada release, Android recusa atualizar por cima e o
       usuário precisa desinstalar, perdendo todo o IndexedDB.
@@ -59,6 +63,11 @@ const PERMISSOES = [
   'android.permission.SCHEDULE_EXACT_ALARM',
   'android.permission.USE_EXACT_ALARM',
   'android.permission.VIBRATE',
+
+  /* Alarme criado no app de Relógio do aparelho (Rota B do plano de
+     alarme). Permissão install-time, sem prompt — o Relógio da Samsung
+     recusa a intent sem ela. */
+  'com.android.alarm.permission.SET_ALARM',
 ];
 
 /* Escrita na pasta pública Documentos. Da API 30 em diante o app já pode
@@ -100,6 +109,9 @@ const QUERIES = `    <queries>
         <intent>
             <action android:name="android.intent.action.SEND" />
             <data android:mimeType="application/pdf" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SET_ALARM" />
         </intent>
     </queries>
 `;
@@ -216,7 +228,124 @@ function patchIconeNotificacao() {
   console.log('✓ drawable/ic_stat_electric.xml: ícone próprio das notificações');
 }
 
-/* ── 4. Assinatura de release ── */
+/* ── 4. Plugin EbRelogio ──
+   Delega o alarme ao app de Relógio do aparelho (Samsung Clock no S23) por
+   AlarmClock.ACTION_SET_ALARM: alarme de verdade, toca no volume de alarme
+   mesmo no silencioso, com o snooze do próprio Relógio. O WebView do
+   Capacitor não dispara Intent com extras, então precisa deste shim.
+
+   Escrito em Java de propósito: o projeto que o `cap add android` gera não
+   aplica o plugin Kotlin, e um .kt aqui não compilaria. */
+
+const APP_ID = JSON.parse(readFileSync('capacitor.config.json', 'utf8')).appId;
+const PKG_DIR = 'android/app/src/main/java/' + APP_ID.replace(/\./g, '/');
+
+const PLUGIN_JAVA = `package ${APP_ID};
+
+import android.content.Intent;
+import android.provider.AlarmClock;
+
+import com.getcapacitor.JSObject;
+import com.getcapacitor.Plugin;
+import com.getcapacitor.PluginCall;
+import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.CapacitorPlugin;
+
+/** Cria um alarme no app de Relogio do aparelho. Gerado por scripts/patch-android.mjs. */
+@CapacitorPlugin(name = "EbRelogio")
+public class EbRelogioPlugin extends Plugin {
+
+    /** ACTION_SET_ALARM so aceita hora e minuto: quem decide se a data faz
+     *  sentido e' o JS (podeAlarmeRelogio), que so oferece o botao quando o
+     *  aviso cai dentro das proximas 24 h. */
+    @PluginMethod
+    public void criarAlarme(PluginCall call) {
+        Integer hora = call.getInt("hora");
+        Integer minuto = call.getInt("minuto", 0);
+        if (hora == null || hora < 0 || hora > 23) {
+            call.reject("hora invalida");
+            return;
+        }
+        String titulo = call.getString("titulo", "Compromisso");
+
+        Intent i = new Intent(AlarmClock.ACTION_SET_ALARM);
+        i.putExtra(AlarmClock.EXTRA_HOUR, hora.intValue());
+        i.putExtra(AlarmClock.EXTRA_MINUTES, minuto == null ? 0 : minuto.intValue());
+        i.putExtra(AlarmClock.EXTRA_MESSAGE, titulo);
+        i.putExtra(AlarmClock.EXTRA_VIBRATE, true);
+        i.putExtra(AlarmClock.EXTRA_SKIP_UI, !Boolean.FALSE.equals(call.getBoolean("semUi", Boolean.TRUE)));
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+        if (i.resolveActivity(getContext().getPackageManager()) == null) {
+            call.reject("Nenhum app de relogio disponivel neste aparelho.");
+            return;
+        }
+        try {
+            getContext().startActivity(i);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Falha ao criar o alarme: " + e.getMessage());
+        }
+    }
+
+    /** ROM sem app de relogio existe: a UI usa isto pra esconder o botao
+     *  em vez de so falhar no toque. */
+    @PluginMethod
+    public void disponivel(PluginCall call) {
+        Intent i = new Intent(AlarmClock.ACTION_SET_ALARM);
+        JSObject ret = new JSObject();
+        ret.put("value", i.resolveActivity(getContext().getPackageManager()) != null);
+        call.resolve(ret);
+    }
+}
+`;
+
+function patchPluginRelogio() {
+  mkdirSync(PKG_DIR, { recursive: true });
+  writeFileSync(`${PKG_DIR}/EbRelogioPlugin.java`, PLUGIN_JAVA);
+
+  const main = `${PKG_DIR}/MainActivity.java`;
+  if (!existsSync(main)) {
+    console.log('· MainActivity.java ausente — plugin EbRelogio não registrado');
+    return;
+  }
+  let java = readFileSync(main, 'utf8');
+  if (java.includes('EbRelogioPlugin.class')) {
+    console.log('· MainActivity já registra EbRelogio');
+    return;
+  }
+
+  /* o template do Capacitor 6 é uma classe vazia; o registro precisa vir
+     ANTES do super.onCreate(), senão a bridge já subiu sem o plugin */
+  java = java.replace(
+    /public class MainActivity extends BridgeActivity \{\s*\}/,
+    `public class MainActivity extends BridgeActivity {
+    @Override
+    public void onCreate(android.os.Bundle savedInstanceState) {
+        registerPlugin(EbRelogioPlugin.class);
+        super.onCreate(savedInstanceState);
+
+        // Zoom desligado na marra. O meta viewport com user-scalable=no
+        // cobre o caso normal, mas um arrasto começado na barra de baixo
+        // ainda conseguia dar zoom-out: a moldura de "celular" voltava
+        // centralizada, com o fundo azul em volta, e a tela inteira
+        // ficava arrastável. Aqui o WebView nem oferece o gesto.
+        android.webkit.WebSettings ws = getBridge().getWebView().getSettings();
+        ws.setSupportZoom(false);
+        ws.setBuiltInZoomControls(false);
+        ws.setDisplayZoomControls(false);
+    }
+}`
+  );
+  if (!java.includes('EbRelogioPlugin.class')) {
+    console.log('· MainActivity com formato inesperado — plugin EbRelogio NÃO registrado');
+    return;
+  }
+  writeFileSync(main, java);
+  console.log('✓ EbRelogioPlugin.java escrito e registrado no MainActivity');
+}
+
+/* ── 5. Assinatura de release ── */
 
 function patchGradle() {
   if (!existsSync('android/app/release.keystore')) {
@@ -254,7 +383,7 @@ function patchGradle() {
   console.log('✓ build.gradle: signingConfig de release aplicada');
 }
 
-/* ── 5. versionCode / versionName a partir da tag ──
+/* ── 6. versionCode / versionName a partir da tag ──
    O Capacitor gera sempre versionCode 1. Android recusa instalar por
    cima um APK com versionCode menor que o instalado, então derivamos um
    número crescente da tag (v1.2.0 → 10200). Sem tag, mantém o padrão. */
@@ -281,5 +410,6 @@ function patchVersao() {
 patchManifest();
 patchFilePaths();
 patchIconeNotificacao();
+patchPluginRelogio();
 patchVersao();
 patchGradle();
