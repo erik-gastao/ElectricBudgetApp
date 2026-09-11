@@ -995,6 +995,37 @@
   .orc-hist-badge.enviado  { background: #fff7ed; color: #92400e; border: 1.5px solid #f59e0b; }
   .orc-hist-badge.aprovado { background: #eff6ff; color: #1e3a8a; border: 1.5px solid #3b82f6; }
   .orc-hist-badge.recusado { background: #fef2f2; color: #991b1b; border: 1.5px solid #ef4444; }
+  /* PAGO ocupa a mesma vaga que APROVADO ocupava na linha — o orçamento
+     quitado troca o badge, não ganha uma segunda linha embaixo da descrição */
+  .orc-hist-badge.pago     { background: #f0fdf4; color: #166534; border: 1.5px solid #22c55e; }
+
+  /* SCROLL DA SEÇÃO ORÇAMENTOS NA HOME
+     Mesma solução de .pay-home-scroll: a lista rola dentro da própria
+     seção, então cabem os últimos orçamentos sem empurrar Pagamentos
+     para fora da tela. */
+  .orc-home-scroll { max-height: 190px; overflow-y: auto; }
+
+  /* FOTO DO CONTATO NO AVATAR
+     A foto vem da agenda em proporção qualquer: `object-fit: cover` corta
+     pelo centro em vez de espremer o rosto, e o overflow oculto mantém o
+     círculo. Sem foto o avatar continua exatamente como era — o gradiente
+     e as iniciais. */
+  .avatar.com-foto,
+  .perfil-avatar.com-foto,
+  .cliente-picker-avatar.com-foto {
+    background: #e5e7eb;
+    overflow: hidden;
+    padding: 0;
+  }
+  .avatar.com-foto img,
+  .perfil-avatar.com-foto img,
+  .cliente-picker-avatar.com-foto img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+    display: block;
+  }
 
   /* SEGUNDO BOTÃO NO CARD DE PAGAMENTO */
   .pay-action-btn + .pay-action-btn { margin-top: 6px; }

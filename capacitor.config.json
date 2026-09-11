@@ -2,5 +2,11 @@
   "appId": "com.erikgastao.electricbudget",
   "appName": "Electric Budget",
   "webDir": "app",
-  "backgroundColor": "#1e3a5f"
+  "backgroundColor": "#1e3a5f",
+  "plugins": {
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_electric",
+      "iconColor": "#D9890A"
+    }
+  }
 }

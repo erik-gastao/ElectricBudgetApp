@@ -12,7 +12,10 @@
       FileOpener não acha nenhum leitor de PDF.
    2. Raízes do FileProvider em file_paths.xml, sem as quais entregar o
       PDF por content:// lança IllegalArgumentException.
-   3. Assinatura de release a partir de um keystore fixo. Sem isso o CI
+   3. Ícone das notificações na barra de status. Sem um drawable próprio o
+      @capacitor/local-notifications cai no ícone padrão do sistema — o
+      círculo com "i".
+   4. Assinatura de release a partir de um keystore fixo. Sem isso o CI
       assina com o keystore de debug efêmero do runner — assinatura
       diferente a cada release, Android recusa atualizar por cima e o
       usuário precisa desinstalar, perdendo todo o IndexedDB.
@@ -20,7 +23,7 @@
    Uso: node scripts/patch-android.mjs
    ================================================================ */
 
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 
 const MANIFEST = 'android/app/src/main/AndroidManifest.xml';
 const GRADLE = 'android/app/build.gradle';
@@ -180,7 +183,40 @@ function patchFilePaths() {
   console.log('✓ file_paths.xml: raízes do FileProvider completas');
 }
 
-/* ── 3. Assinatura de release ── */
+/* ── 3. Ícone das notificações ──
+   O Android só aproveita o canal alfa deste drawable: pinta a silhueta de
+   branco (ou da cor de `iconColor`, definida em capacitor.config.json) e
+   descarta o resto. Por isso o traçado é chapado, sem gradiente nem furo
+   fino — meio-tom vira borrão na barra de status.
+
+   O nome do arquivo tem que bater com
+   plugins.LocalNotifications.smallIcon do capacitor.config.json; se não
+   bater, o plugin não acha o recurso e volta pro ícone padrão do sistema
+   (o círculo com "i"). */
+
+const DRAWABLE_DIR = 'android/app/src/main/res/drawable';
+const ICONE_NOTIF = `${DRAWABLE_DIR}/ic_stat_electric.xml`;
+
+const ICONE_NOTIF_XML = `<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFF">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M13.5,1.5 L4.5,13.2 h6.1 l-1.3,9.3 9.2,-12.2 h-6.3 z" />
+</vector>
+`;
+
+function patchIconeNotificacao() {
+  mkdirSync(DRAWABLE_DIR, { recursive: true });
+  writeFileSync(ICONE_NOTIF, ICONE_NOTIF_XML);
+  console.log('✓ drawable/ic_stat_electric.xml: ícone próprio das notificações');
+}
+
+/* ── 4. Assinatura de release ── */
 
 function patchGradle() {
   if (!existsSync('android/app/release.keystore')) {
@@ -218,7 +254,7 @@ function patchGradle() {
   console.log('✓ build.gradle: signingConfig de release aplicada');
 }
 
-/* ── 4. versionCode / versionName a partir da tag ──
+/* ── 5. versionCode / versionName a partir da tag ──
    O Capacitor gera sempre versionCode 1. Android recusa instalar por
    cima um APK com versionCode menor que o instalado, então derivamos um
    número crescente da tag (v1.2.0 → 10200). Sem tag, mantém o padrão. */
@@ -244,5 +280,6 @@ function patchVersao() {
 
 patchManifest();
 patchFilePaths();
+patchIconeNotificacao();
 patchVersao();
 patchGradle();

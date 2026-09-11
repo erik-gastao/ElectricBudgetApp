@@ -70,6 +70,45 @@ function iniciais(nome) {
     .map(function(p) { return p[0] ? p[0].toUpperCase() : ''; }).join('');
 }
 
+/* ── FOTO DO CONTATO ──
+   O @capacitor-community/contacts devolve a foto já como data URI pronta
+   ("data:image/png;base64,…") e é a miniatura do contato, não a foto em
+   tamanho cheio — alguns KB, cabe no IndexedDB junto do cliente.
+
+   A string vai parar dentro de um atributo src montado por concatenação,
+   então ela é validada contra o formato exato antes de ser usada: o dado
+   vem da agenda do celular, que o app não controla, e um `"` solto ali
+   viraria injeção de HTML no meio da lista de clientes. */
+var _RE_FOTO = /^data:image\/(?:png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/]+=*$/;
+
+function fotoCliente(c) {
+  var f = c && c.foto;
+  return (typeof f === 'string' && _RE_FOTO.test(f)) ? f : '';
+}
+
+/* Preenche um avatar já existente no HTML: foto quando houver, iniciais
+   (ou `vazio`, p/ a lupa do picker) quando não. */
+function pintarAvatar(el, c, vazio) {
+  if (!el) return;
+  var f = fotoCliente(c);
+  if (f) {
+    el.classList.add('com-foto');
+    el.innerHTML = '<img src="' + f + '" alt="" />';
+    return;
+  }
+  el.classList.remove('com-foto');
+  el.textContent = vazio !== undefined ? vazio : iniciais(c && c.nome);
+}
+
+/* Mesma coisa para as listas, que montam o HTML de uma vez só. */
+function avatarHtml(c, classe) {
+  var cls = classe || 'avatar';
+  var f = fotoCliente(c);
+  return f
+    ? '<div class="' + cls + ' com-foto"><img src="' + f + '" alt="" /></div>'
+    : '<div class="' + cls + '">' + esc(iniciais(c && c.nome)) + '</div>';
+}
+
 var _meses = ['JANEIRO','FEVEREIRO','MARÇO','ABRIL','MAIO','JUNHO','JULHO','AGOSTO','SETEMBRO','OUTUBRO','NOVEMBRO','DEZEMBRO'];
 var _diasSemana = ['DOMINGO','SEGUNDA','TERÇA','QUARTA','QUINTA','SEXTA','SÁBADO'];
 var _diasAbrev = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
@@ -993,6 +1032,11 @@ function registrarArquivo(meta) {
     titulo: meta.titulo || meta.nome,
     uri: meta.uri || null,
     dir: meta.dir || null,
+    path: meta.path || null,
+    /* selo: impressão digital do estado que gerou o PDF. Enquanto ela não
+       muda, o arquivo no disco continua correto e pode ser reaberto em vez
+       de regerado (ver reciboSalvoDe). */
+    selo: meta.selo || null,
     criadoEm: new Date().toISOString()
   };
   if (anterior) arquivos.splice(arquivos.indexOf(anterior), 1);
@@ -1023,7 +1067,7 @@ function entregarPdf(doc, nomeArq, label, meta) {
 }
 
 function entregarPdfWeb(doc, nomeArq, label, meta) {
-  registrarArquivo(Object.assign({}, meta || {}, { uri: null, dir: null }));
+  registrarArquivo(Object.assign({}, meta || {}, { uri: null, dir: null, path: null }));
   function baixar() {
     try { doc.save(nomeArq); } catch (e) { showToast('Falha ao salvar PDF.'); }
   }
@@ -1059,14 +1103,79 @@ var _PDF_DIR_LABEL = {
   CACHE: 'na área temporária do app'
 };
 
-function _gravarPdfEm(FS, dirs, i, nomeArq, base64) {
+/* ── PASTAS PRÓPRIAS NO APARELHO ──
+   Antes cada PDF era gravado solto na raiz do diretório escolhido e se
+   misturava ao resto (Downloads/Documentos). Agora cada tipo tem pasta:
+
+     <Documentos>/Electric Budget/Orcamentos/orcamento-….pdf
+     <Documentos>/Electric Budget/Recibos/recibo-….pdf
+
+   O nome das pastas é ASCII de propósito: acento em caminho de arquivo
+   ainda quebra gerenciador de arquivos e compartilhamento em alguns ROMs.
+   `writeFile({recursive:true})` cria a árvore sozinho; `rename` NÃO cria,
+   por isso a migração chama mkdir antes (ver organizarPdfsEmPastas). */
+var PASTA_APP = 'Electric Budget';
+
+var _PDF_SUBPASTA = { orcamento: 'Orcamentos', recibo: 'Recibos', documento: 'Documentos' };
+
+function pastaDoTipo(tipo) {
+  return PASTA_APP + '/' + (_PDF_SUBPASTA[tipo] || _PDF_SUBPASTA.documento);
+}
+
+function caminhoPdf(tipo, nomeArq) {
+  return pastaDoTipo(tipo) + '/' + nomeArq;
+}
+
+/* onde o arquivo está, em português, para a aba PDFs e os avisos */
+function ondeArquivo(a) {
+  if (!a.dir) return 'gerado sob demanda';
+  var base = _PDF_DIR_LABEL[a.dir] || 'no aparelho';
+  return a.path ? base + ' › ' + pastaDoTipo(a.tipo) : base;
+}
+
+function _gravarPdfEm(FS, dirs, i, caminho, base64) {
   if (i >= dirs.length) return Promise.reject(new Error('nenhum diretório aceitou a escrita'));
-  return FS.writeFile({ path: nomeArq, data: base64, directory: dirs[i], recursive: true })
+  return FS.writeFile({ path: caminho, data: base64, directory: dirs[i], recursive: true })
     .then(function(r) { return { uri: r && r.uri, dir: dirs[i] }; })
     .catch(function(e) {
-      diag('pdf: escrita em ' + dirs[i] + ' falhou', e);
-      return _gravarPdfEm(FS, dirs, i + 1, nomeArq, base64);
+      diag('pdf: escrita em ' + dirs[i] + '/' + caminho + ' falhou', e);
+      return _gravarPdfEm(FS, dirs, i + 1, caminho, base64);
     });
+}
+
+/* Migração dos PDFs antigos (F6.6) — os que foram gravados antes das
+   pastas existirem não têm `path` e estão na raiz do diretório. Move um a
+   um, em série; falha em qualquer um não interrompe os outros nem perde o
+   registro, que segue apontando para o arquivo onde ele está hoje. */
+function _moverArquivoParaPasta(FS, a) {
+  var destino = caminhoPdf(a.tipo, a.nome);
+  return FS.mkdir({ path: pastaDoTipo(a.tipo), directory: a.dir, recursive: true })
+    .catch(function() { /* pasta já existe — o mkdir do Capacitor rejeita nesse caso */ })
+    .then(function() {
+      return FS.rename({ from: a.nome, to: destino, directory: a.dir, toDirectory: a.dir });
+    })
+    .then(function() { return FS.getUri({ path: destino, directory: a.dir }); })
+    .then(function(r) {
+      a.path = destino;
+      if (r && r.uri) a.uri = r.uri;
+      if (_dbOk) return dbPut('arquivos', a);
+    })
+    .catch(function(e) { diag('arquivos: não moveu "' + a.nome + '" para a pasta do app', e); });
+}
+
+function organizarPdfsEmPastas() {
+  var FS = pluginFilesystem();
+  if (!capNativo() || !FS || typeof FS.rename !== 'function') return Promise.resolve();
+  var pendentes = arquivos.filter(function(a) { return a.uri && a.dir && !a.path; });
+  if (pendentes.length === 0) return Promise.resolve();
+  diag('arquivos: organizando ' + pendentes.length + ' PDF(s) nas pastas do app…');
+  return pendentes.reduce(function(seq, a) {
+    return seq.then(function() { return _moverArquivoParaPasta(FS, a); });
+  }, Promise.resolve()).then(function() {
+    var movidos = pendentes.filter(function(a) { return !!a.path; }).length;
+    diag('arquivos: ' + movidos + '/' + pendentes.length + ' movido(s) para ' + PASTA_APP);
+    if (activeScreenId() === 'screen-arquivos') renderArquivos();
+  });
 }
 
 function entregarPdfNativo(doc, nomeArq, label, meta) {
@@ -1083,12 +1192,13 @@ function entregarPdfNativo(doc, nomeArq, label, meta) {
   }
   if (!base64) { showToast('Falha ao gerar o PDF.'); return; }
 
-  diag('pdf: gravando ' + nomeArq + ' (' + Math.round(base64.length * 0.75 / 1024) + ' KB)');
+  var caminho = caminhoPdf((meta || {}).tipo, nomeArq);
+  diag('pdf: gravando ' + caminho + ' (' + Math.round(base64.length * 0.75 / 1024) + ' KB)');
 
-  _gravarPdfEm(FS, _PDF_DIRS, 0, nomeArq, base64).then(function(r) {
-    diag('pdf: gravado em ' + r.dir + ' -> ' + r.uri);
-    registrarArquivo(Object.assign({}, meta || {}, { uri: r.uri, dir: r.dir }));
-    var onde = _PDF_DIR_LABEL[r.dir] || 'no aparelho';
+  _gravarPdfEm(FS, _PDF_DIRS, 0, caminho, base64).then(function(r) {
+    diag('pdf: gravado em ' + r.dir + '/' + caminho + ' -> ' + r.uri);
+    var reg = registrarArquivo(Object.assign({}, meta || {}, { uri: r.uri, dir: r.dir, path: caminho }));
+    var onde = ondeArquivo(reg);
     showConfirm('PDF salvo ' + onde + ' como "' + nomeArq + '". Abrir ' + label + ' agora?',
       function() { abrirPdfNativo(r.uri, nomeArq, label); },
       function() { showToast('PDF salvo: ' + nomeArq); });
@@ -1155,7 +1265,7 @@ function renderArquivos() {
 
   list.innerHTML = itens.map(function(a) {
     var quando = String(a.criadoEm || '').slice(0, 10).split('-').reverse().join('/');
-    var onde = a.dir ? (_PDF_DIR_LABEL[a.dir] || 'no aparelho') : 'gerado sob demanda';
+    var onde = ondeArquivo(a);
     return '<div class="arq-card">'
       + '<div class="arq-top">'
       +   '<span class="arq-nome">' + esc(a.nome) + '</span>'
@@ -1183,7 +1293,7 @@ function regerarArquivo(a) {
   if (a.tipo === 'recibo') {
     var p = pagamentoById(a.refId);
     if (!p) { showToast('O pagamento de origem não existe mais.'); return false; }
-    verRecibo(p.id, a.nome);
+    verRecibo(p.id, a.nome, true);
     return true;
   }
   showToast('Não é possível reabrir este arquivo.');
@@ -1217,7 +1327,7 @@ function excluirArquivo(id) {
     /* o arquivo pode já ter sido apagado por fora — falha ali não impede
        tirar o registro da lista */
     var apagarDisco = (capNativo() && FS && a.dir)
-      ? FS.deleteFile({ path: a.nome, directory: a.dir }).catch(function(e) {
+      ? FS.deleteFile({ path: a.path || a.nome, directory: a.dir }).catch(function(e) {
           diag('arquivos: não apagou do disco', e);
         })
       : Promise.resolve();
@@ -1236,10 +1346,40 @@ function excluirArquivo(id) {
   });
 }
 
-/* Recibo em PDF do pagamento pago (F6.5) */
-function verRecibo(id, nomeForcado) {
+/* Selo do recibo: enquanto os recebimentos do pagamento não mudarem, o PDF
+   já gravado continua dizendo a verdade. Um recebimento novo (ou desfeito)
+   muda o selo e o recibo precisa mesmo ser gerado de novo. */
+function seloRecibo(p) {
+  return recebimentosDe(p).length + ':' + totalRecebido(p).toFixed(2);
+}
+
+/* Recibo já gravado no aparelho e ainda válido para este pagamento. */
+function reciboSalvoDe(p) {
+  var selo = seloRecibo(p);
+  for (var i = 0; i < arquivos.length; i++) {
+    var a = arquivos[i];
+    if (a.tipo === 'recibo' && a.refId === p.id && a.uri && a.selo === selo) return a;
+  }
+  return null;
+}
+
+/* Recibo em PDF do pagamento pago (F6.5).
+   `forcarNovo` é para quem quer o arquivo refeito de propósito — hoje só a
+   regeração a partir da aba PDFs, quando o arquivo sumiu do disco. Sem ele,
+   VER RECIBO abre o PDF que já existe em vez de gerar outro a cada toque. */
+function verRecibo(id, nomeForcado, forcarNovo) {
   var p = pagamentoById(id);
   if (!p || totalRecebido(p) <= 0.004) return;
+
+  if (!forcarNovo && capNativo()) {
+    var salvo = reciboSalvoDe(p);
+    if (salvo) {
+      diag('recibo: reabrindo ' + (salvo.path || salvo.nome) + ' (selo ' + salvo.selo + ')');
+      abrirPdfNativo(salvo.uri, salvo.nome, 'o recibo');
+      return;
+    }
+  }
+
   if (!window.jspdf || !window.jspdf.jsPDF) {
     showToast('Gerador de PDF não carregado. Recarregue o app.');
     return;
@@ -1307,15 +1447,17 @@ function verRecibo(id, nomeForcado) {
     y += 6;
   }
 
-  var yAssin = Math.max(y + 14, 130);
+  /* teto de 265mm: sem ele um recibo com histórico longo empurrava a
+     assinatura (e o documento embaixo dela) para fora da folha A4 */
+  var yAssin = Math.min(Math.max(y + 14, 130), 265);
   doc.setDrawColor(120, 120, 120);
   doc.line(M + 30, yAssin, W - M - 30, yAssin);
   doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
   doc.setTextColor(60, 60, 60);
   doc.text(perfilEletricista.nome, W / 2, yAssin + 6, { align: 'center' });
   if (perfilEletricista.documento) {
-    doc.setFontSize(8); doc.setTextColor(120, 120, 120);
-    doc.text(perfilEletricista.documento, W / 2, yAssin + 11, { align: 'center' });
+    doc.setFontSize(8); doc.setTextColor(90, 90, 90);
+    doc.text('CPF/CNPJ: ' + perfilEletricista.documento, W / 2, yAssin + 11, { align: 'center' });
   }
 
   doc.setFontSize(8); doc.setTextColor(150, 150, 150);
@@ -1330,6 +1472,7 @@ function verRecibo(id, nomeForcado) {
   entregarPdf(doc, nomeForcado || nomeArq, 'o recibo', {
     tipo: 'recibo',
     refId: p.id,
+    selo: seloRecibo(p),
     titulo: (c ? c.nome : 'Cliente') + ' - ' + fmtBR(recebido) + (parcial ? ' (parcial)' : ''),
     semPerguntar: !!nomeForcado
   });
@@ -1801,14 +1944,16 @@ function renderHomeAgenda() {
   container.innerHTML = html;
 }
 
-/* Home: 3 orçamentos mais recentes (§1) */
+/* Home: orçamentos mais recentes (§1). A lista tem scroll próprio
+   (.orc-home-scroll), como a de pagamentos, então cabe mais do que os 3
+   que apareciam antes sem o usuário perder o resto da página. */
 function renderHomeOrcamentos() {
   var container = document.getElementById('home-orc-list');
   if (!container) return;
 
   var items = orcamentos.slice().sort(function(a, b) {
     return b.data.localeCompare(a.data);
-  }).slice(0, 3);
+  }).slice(0, 12);
 
   if (items.length === 0) {
     container.innerHTML = '<div style="color:#aaa;font-size:13px;padding:4px 0 8px;">Nenhum orçamento ainda.</div>';
@@ -1824,7 +1969,7 @@ function renderHomeOrcamentos() {
       + '</div>'
       + '<div class="orc-hist-right">'
       + '<span class="orc-hist-val">' + fmtBR(o.total) + '</span>'
-      + '<span class="orc-hist-badge ' + o.status + '">' + (_orcStatusBadge[o.status] || o.status.toUpperCase()) + '</span>'
+      + '<span class="orc-hist-badge ' + orcStatusVisual(o) + '">' + (_orcStatusBadge[orcStatusVisual(o)] || o.status.toUpperCase()) + '</span>'
       + '</div></div>';
   }).join('');
 }
@@ -1840,7 +1985,9 @@ function abrirDetalheAgendamento(id) {
   var d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
   var dataFmt = d.getDate() + ' de ' + _meses[d.getMonth()].charAt(0) + _meses[d.getMonth()].slice(1).toLowerCase() + ' de ' + parts[0];
 
-  document.getElementById('det-avatar').textContent = iniciais(a.cliente);
+  /* o agendamento guarda o nome, não o id — a foto vem do cliente de
+     mesmo nome, quando ele existe */
+  pintarAvatar(document.getElementById('det-avatar'), clientePorNome(a.cliente) || { nome: a.cliente });
   document.getElementById('det-cliente').textContent = a.cliente;
   document.getElementById('det-data-hora').textContent = dataFmt + ' · ' + a.hora;
   document.getElementById('det-desc').textContent = a.desc;
@@ -2334,7 +2481,7 @@ function renderClientes() {
       ? '<div class="cliente-sync">📱 da agenda do celular</div>'
       : '';
     return '<div class="cliente-row" onclick="abrirPerfilCliente(\'' + c.id + '\')" role="button" aria-label="Abrir ' + esc(c.nome) + '">'
-      + '<div class="avatar">' + esc(iniciais(c.nome)) + '</div>'
+      + avatarHtml(c)
       + '<div class="cliente-info">'
       + '<div class="cnome">' + esc(c.nome) + '</div>'
       + '<div class="ccel">' + esc(c.telefone || 'sem telefone') + '</div>'
@@ -2345,7 +2492,28 @@ function renderClientes() {
   }).join('');
 }
 
-var _orcStatusBadge = { rascunho: 'RASCUNHO', enviado: 'ENVIADO', aprovado: 'APROVADO', recusado: 'RECUSADO' };
+var _orcStatusBadge = { rascunho: 'RASCUNHO', enviado: 'ENVIADO', aprovado: 'APROVADO', recusado: 'RECUSADO', pago: 'PAGO' };
+
+/* Um orçamento aprovado gera um Pagamento (SPEC §8.1). Quando esse pagamento
+   é quitado, o que interessa na lista não é mais "aprovado" e sim "pago" —
+   então o badge passa a mostrar PAGO, no MESMO lugar onde APROVADO aparecia.
+   É derivado, como statusPagamento(): o `status` gravado no orçamento não
+   muda, e os filtros da lista continuam funcionando por ele. */
+function orcamentoQuitado(o) {
+  if (!o || o.status !== 'aprovado') return false;
+  var achou = false;
+  for (var i = 0; i < pagamentos.length; i++) {
+    if (pagamentos[i].orcamentoId !== o.id) continue;
+    achou = true;
+    if (statusPagamento(pagamentos[i]) !== 'pago') return false;
+  }
+  return achou;
+}
+
+/* chave usada no badge/classe CSS: o status gravado, ou 'pago' quando quitado */
+function orcStatusVisual(o) {
+  return orcamentoQuitado(o) ? 'pago' : o.status;
+}
 
 function abrirPerfilCliente(id) {
   if (!clienteById(id)) return;
@@ -2361,7 +2529,7 @@ function renderPerfilCliente() {
   var c = clienteById(id);
   if (!c) return;
 
-  document.getElementById('pc-avatar').textContent = iniciais(c.nome);
+  pintarAvatar(document.getElementById('pc-avatar'), c);
   document.getElementById('pc-nome').textContent = c.nome;
   document.getElementById('pc-cidade').textContent = c.cidade ? c.cidade + ' – RS' : '';
   document.getElementById('pc-tel').textContent = c.telefone || '—';
@@ -2395,7 +2563,7 @@ function renderPerfilCliente() {
         + '</div>'
         + '<div class="orc-hist-right">'
         + '<span class="orc-hist-val">' + fmtBR(o.total) + '</span>'
-        + '<span class="orc-hist-badge ' + o.status + '">' + (_orcStatusBadge[o.status] || o.status.toUpperCase()) + '</span>'
+        + '<span class="orc-hist-badge ' + orcStatusVisual(o) + '">' + (_orcStatusBadge[orcStatusVisual(o)] || o.status.toUpperCase()) + '</span>'
         + '</div></div>';
     }).join('');
   }
@@ -2524,6 +2692,24 @@ function diagAmostraContato(c) {
   };
 }
 
+/* Teto da foto guardada por cliente. A miniatura do Android costuma dar
+   poucos KB; um blob muito maior é foto em tamanho cheio de algum app de
+   contatos alternativo e não vale carregar em toda listagem — nesse caso
+   o cliente fica com as iniciais, como antes. */
+var _FOTO_MAX_BYTES = 512 * 1024;
+
+function fotoDaAgenda(c) {
+  var f = c && c.image && c.image.base64String;
+  if (typeof f !== 'string' || !f) return '';
+  if (f.length > _FOTO_MAX_BYTES) {
+    diag('contatos: foto de "' + String(c.contactId) + '" ignorada (' + Math.round(f.length / 1024) + ' KB)');
+    return '';
+  }
+  /* mesma validação de fotoCliente(): o que não casa com o formato não
+     entra no banco, para nunca chegar montado num src lá na frente */
+  return fotoCliente({ foto: f });
+}
+
 /* Lê a agenda e normaliza para o shape de cliente. */
 function lerContatosDoAparelho() {
   var C = pluginContacts();
@@ -2560,7 +2746,13 @@ function lerContatosDoAparelho() {
       }
 
       diag('contatos: chamando getContacts…');
-      return C.getContacts({ projection: { name: true, phones: true, postalAddresses: true } })
+      /* `image` é o único campo caro desta projection — o plugin avisa que
+         ele pode pesar na consulta, porque cada contato com foto vira uma
+         leitura de blob a mais. Vale o custo: a consulta roda no boot, em
+         segundo plano, e a foto é o que faz o cliente ser reconhecido de
+         relance na lista. O que vem é a miniatura do contato, de alguns KB,
+         não a foto em tamanho cheio. */
+      return C.getContacts({ projection: { name: true, phones: true, postalAddresses: true, image: true } })
         .then(function(res) {
           var brutos = (res && res.contacts) || [];
           diag('contatos: getContacts devolveu ' + brutos.length + ' registro(s) bruto(s)'
@@ -2576,7 +2768,8 @@ function lerContatosDoAparelho() {
               nome: nome.trim(),
               telefone: (c.phones && c.phones[0] && c.phones[0].number) || '',
               endereco: pa.street || '',
-              cidade: pa.city || ''
+              cidade: pa.city || '',
+              foto: fotoDaAgenda(c)
             };
           }).filter(function(c) {
             if (!c.nome) { semNome++; return false; }
@@ -2639,13 +2832,15 @@ function sincronizarContatos(interativo) {
           orfao.telefone = ct.telefone;
           if (ct.endereco) orfao.endereco = ct.endereco;
           if (ct.cidade) orfao.cidade = ct.cidade;
+          if (ct.foto) orfao.foto = ct.foto;
           aGravar.push(orfao);
           adotados++;
         } else {
           var novo = {
             id: novoId(), contatoId: ct.contatoId,
             nome: ct.nome, telefone: ct.telefone,
-            endereco: ct.endereco, bairro: '', cidade: ct.cidade, obs: ''
+            endereco: ct.endereco, bairro: '', cidade: ct.cidade, obs: '',
+            foto: ct.foto || ''
           };
           clientes.push(novo);
           aGravar.push(novo);
@@ -2658,12 +2853,17 @@ function sincronizarContatos(interativo) {
       var mudou = existente.nome !== ct.nome || existente.telefone !== ct.telefone;
       if (ct.endereco && existente.endereco !== ct.endereco) mudou = true;
       if (ct.cidade && existente.cidade !== ct.cidade) mudou = true;
+      /* foto trocada no celular, ou foto que o app ainda não tinha. Comparar
+         as duas strings inteiras é barato perto de regravar o cliente à toa
+         em todo boot. */
+      if ((ct.foto || '') !== (existente.foto || '')) mudou = true;
       if (!mudou) return;
 
       existente.nome = ct.nome;
       existente.telefone = ct.telefone;
       if (ct.endereco) existente.endereco = ct.endereco;
       if (ct.cidade) existente.cidade = ct.cidade;
+      existente.foto = ct.foto || '';
       aGravar.push(existente);
       atualizados++;
     });
@@ -2743,6 +2943,129 @@ function novoContatoNoCelular() {
     .catch(function(e) { diag('novo contato: AppLauncher FALHOU →', e); fallback(); });
 }
 
+/* ── EDIÇÃO QUE VOLTA PARA A AGENDA DO CELULAR ──
+   O @capacitor-community/contacts não tem updateContact: só create e delete.
+   Então "editar" é gravar o contato corrigido e só depois apagar o antigo —
+   nessa ordem, porque se a gravação falhar nada foi perdido. O contactId
+   muda no processo, e é por isso que `cli.contatoId` é reapontado aqui: o
+   sync casa cliente e contato por esse id, e sem a troca o próximo sync
+   traria o contato novo como se fosse outro cliente.
+
+   Campos que o app não edita (foto, e-mail, organização, aniversário, nota,
+   URLs, telefones extras) são lidos do contato original e regravados junto,
+   senão a edição de um telefone apagaria o resto da ficha. A conta de origem
+   (Google/local) o plugin não devolve — um contato reescrito por aqui pode
+   nascer como contato local do aparelho. */
+function _entradaContato(cli, atual) {
+  var partes = String(cli.nome || '').trim().split(/\s+/);
+  var entrada = {
+    name: {
+      given: partes[0] || cli.nome,
+      family: partes.length > 1 ? partes.slice(1).join(' ') : null
+    },
+    phones: [{ type: 'mobile', isPrimary: true, number: cli.telefone }]
+  };
+
+  /* telefones que o app não gerencia continuam na ficha */
+  (atual.phones || []).forEach(function(f) {
+    if (f && f.number && f.number !== cli.telefone) {
+      entrada.phones.push({ type: f.type || 'other', label: f.label || null, number: f.number });
+    }
+  });
+
+  var end = {
+    type: 'home', isPrimary: true,
+    street: cli.endereco || null,
+    neighborhood: cli.bairro || null,
+    city: cli.cidade || null
+  };
+  if (end.street || end.neighborhood || end.city) entrada.postalAddresses = [end];
+
+  var emails = (atual.emails || []).filter(function(e) { return e && e.address; });
+  if (emails.length) {
+    entrada.emails = emails.map(function(e) {
+      return { type: e.type || 'other', label: e.label || null, address: e.address };
+    });
+  }
+
+  if (atual.organization && (atual.organization.company || atual.organization.jobTitle)) {
+    entrada.organization = {
+      company: atual.organization.company || null,
+      jobTitle: atual.organization.jobTitle || null,
+      department: atual.organization.department || null
+    };
+  }
+  /* BirthdayInput exige dia E mês — meio aniversário rejeita a gravação inteira */
+  var b = atual.birthday;
+  if (b && b.day && b.month) {
+    entrada.birthday = { day: b.day, month: b.month, year: b.year || undefined };
+  }
+  if (atual.note) entrada.note = atual.note;
+  if (atual.urls && atual.urls.length) entrada.urls = atual.urls.slice();
+
+  /* A foto vem da agenda como data URI, mas a gravação faz Base64.decode
+     direto na string — com o prefixo "data:image/…;base64," junto, o decode
+     estoura e leva a criação do contato inteiro com ele. Manda só o payload.
+     Preferência para a que o app já tem (é a mesma, e sobrevive ao contato
+     ter sumido do celular no meio do caminho). */
+  var foto = fotoCliente(cli) || fotoCliente({ foto: (atual.image && atual.image.base64String) || '' });
+  if (foto) entrada.image = { base64String: foto.slice(foto.indexOf(',') + 1) };
+
+  return entrada;
+}
+
+function atualizarContatoNoCelular(cli) {
+  var C = pluginContacts();
+  if (!capNativo() || !C || !cli.contatoId) return Promise.resolve(false);
+  if (typeof C.createContact !== 'function' || typeof C.deleteContact !== 'function') {
+    diag('contato: plugin sem createContact/deleteContact — edição fica só no app');
+    return Promise.resolve(false);
+  }
+  var antigo = String(cli.contatoId);
+
+  return C.checkPermissions().then(function(p) {
+    if (p && p.contacts === 'granted') return p;
+    diag('contato: pedindo permissão de contatos para gravar a edição…');
+    return C.requestPermissions();
+  }).then(function(p) {
+    if (!p || p.contacts !== 'granted') {
+      diag('contato: permissão negada — edição não foi para o celular');
+      showToast('Sem permissão de contatos: a alteração ficou só no app.');
+      return false;
+    }
+    return C.getContact({
+      contactId: antigo,
+      projection: { name: true, phones: true, emails: true, postalAddresses: true,
+                    organization: true, birthday: true, note: true, urls: true, image: true }
+    }).catch(function(e) {
+      /* contato apagado do celular por fora: grava o que o app conhece */
+      diag('contato: getContact falhou, regravando só o que o app tem', e);
+      return null;
+    }).then(function(res) {
+      var atual = (res && res.contact) || {};
+      return C.createContact({ contact: _entradaContato(cli, atual) });
+    }).then(function(r) {
+      var novoContatoId = r && r.contactId;
+      if (!novoContatoId) throw new Error('createContact não devolveu contactId');
+      return C.deleteContact({ contactId: antigo })
+        .catch(function(e) {
+          /* o novo já está gravado; um antigo teimoso vira duplicata, não perda */
+          diag('contato: contato novo gravado, mas o antigo não saiu da agenda', e);
+        })
+        .then(function() {
+          cli.contatoId = String(novoContatoId);
+          diag('contato: agenda atualizada · ' + antigo + ' → ' + cli.contatoId);
+          if (!_dbOk) return true;
+          return dbPut('clientes', cli).then(function() { return true; });
+        });
+    });
+  }).catch(function(e) {
+    diag('contato: falha ao gravar a edição no celular', e);
+    showToast('Não foi possível atualizar o contato no celular.');
+    return false;
+  });
+}
+
 function novoCliente() {
   _cliEditId = null;
   _cliReturn = activeScreenId();
@@ -2783,8 +3106,17 @@ function salvarCliente() {
   erro.style.display = 'none';
 
   var editando = !!_cliEditId;
+  var anterior = editando ? clienteById(_cliEditId) : null;
   var cli = {
     id: _cliEditId || novoId(),
+    /* `contatoId` é o que amarra este cliente ao contato do celular. O
+       formulário não o edita, então ele precisa ser copiado do registro
+       anterior — sem isso, salvar uma edição desligava o cliente da agenda
+       e o sync seguinte o tratava como contato novo. */
+    contatoId: (anterior && anterior.contatoId) || null,
+    /* a foto também não passa pelo formulário: vem da agenda do celular e
+       precisa sobreviver a uma edição de nome ou telefone */
+    foto: (anterior && anterior.foto) || '',
     nome: nome,
     telefone: tel,
     endereco: document.getElementById('cli-rua-input').value.trim(),
@@ -2799,6 +3131,14 @@ function salvarCliente() {
 
   persistPut('clientes', cli, function() {
     showToast(editando ? 'Cliente atualizado!' : 'Cliente salvo com sucesso!');
+    /* cliente espelhado da agenda: a edição feita aqui vai para o celular
+       também, senão o próximo sync desfazia o que o usuário acabou de
+       digitar (o celular sempre vence no sync) */
+    if (editando && cli.contatoId) {
+      atualizarContatoNoCelular(cli).then(function(ok) {
+        if (ok) { showToast('Contato do celular atualizado.'); renderClientes(); }
+      });
+    }
     refreshPickerBotoes();
     renderClientes();
     if (editando) {
@@ -2990,7 +3330,10 @@ function setPickerCliente(alvo, id, nomeSolto) {
   var btn = document.getElementById(alvo + '-cliente-btn');
   if (!btn) return;
   btn.classList.toggle('empty', !t.nome);
-  document.getElementById(alvo + '-cliente-avatar').textContent = t.nome ? iniciais(t.nome) : '🔍';
+  /* cliente digitado à mão (nomeSolto) não tem registro: cai nas iniciais
+     do nome que está no botão */
+  pintarAvatar(document.getElementById(alvo + '-cliente-avatar'),
+    c || (t.nome ? { nome: t.nome } : null), t.nome ? undefined : '🔍');
   document.getElementById(alvo + '-cliente-text').textContent = t.nome || 'Selecionar cliente...';
 }
 
@@ -3042,7 +3385,7 @@ function renderPickerCliente() {
   list.innerHTML = items.map(function(c) {
     var sel = c.id === escolhido;
     return '<div class="cliente-row' + (sel ? ' selected' : '') + '" onclick="escolherClientePicker(\'' + c.id + '\')" role="button" aria-label="Selecionar ' + esc(c.nome) + '">'
-      + '<div class="avatar">' + esc(iniciais(c.nome)) + '</div>'
+      + avatarHtml(c)
       + '<div class="cliente-info">'
       + '<div class="cnome">' + esc(c.nome) + '</div>'
       + '<div class="ccel">' + esc(c.telefone || 'sem telefone') + '</div>'
@@ -3239,6 +3582,11 @@ function cabecalhoPdf(doc, W, M, navy, amber) {
   doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
   doc.text([pe.nome, pe.sub].filter(Boolean).join(' · '), M, 20);
   doc.text([pe.telefone, pe.email].filter(Boolean).join(' · '), M, 25);
+  /* O CPF/CNPJ do eletricista só existia na linha miúda embaixo da
+     assinatura do recibo, que o cliente não lê e que some quando a folha
+     enche. É dado de identificação fiscal: sobe para o cabeçalho, junto do
+     resto do contato, e aparece em todo PDF que o app emite. */
+  if (pe.documento) doc.text('CPF/CNPJ: ' + pe.documento, M, 30);
 }
 
 function gerarPdfOrcamento(o, nomeForcado) {
@@ -3260,7 +3608,7 @@ function gerarPdfOrcamento(o, nomeForcado) {
   doc.text('ORÇAMENTO', M, 45);
   doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
   doc.setTextColor(cinza[0], cinza[1], cinza[2]);
-  doc.text('Data: ' + dataFmt + '    Status: ' + (_orcStatusBadge[o.status] || o.status.toUpperCase()), M, 51);
+  doc.text('Data: ' + dataFmt + '    Status: ' + (_orcStatusBadge[orcStatusVisual(o)] || o.status.toUpperCase()), M, 51);
 
   /* Carimbo de revisão: o cliente já recebeu uma versão anterior deste
      orçamento, então o PDF precisa dizer que os números mudaram — senão
@@ -3498,7 +3846,7 @@ function renderListaOrcamentos() {
       + '</div>'
       + '<div class="orc-hist-right">'
       + '<span class="orc-hist-val">' + fmtBR(o.total) + '</span>'
-      + '<span class="orc-hist-badge ' + o.status + '">' + (_orcStatusBadge[o.status] || o.status.toUpperCase()) + '</span>'
+      + '<span class="orc-hist-badge ' + orcStatusVisual(o) + '">' + (_orcStatusBadge[orcStatusVisual(o)] || o.status.toUpperCase()) + '</span>'
       + '<button class="ag-del-btn" aria-label="Excluir orçamento" '
       + 'onclick="event.stopPropagation();excluirOrcamentoDaLista(\'' + o.id + '\')">✕</button>'
       + '</div></div>';
@@ -3542,8 +3890,9 @@ function renderOrcDetalhe() {
     rev.style.display = txt ? 'block' : 'none';
   }
   var badge = document.getElementById('od-badge');
-  badge.className = 'status-badge ' + o.status;
-  badge.textContent = _orcStatusBadge[o.status] || o.status.toUpperCase();
+  var stVis = orcStatusVisual(o);
+  badge.className = 'status-badge ' + stVis;
+  badge.textContent = _orcStatusBadge[stVis] || o.status.toUpperCase();
 
   var matList = document.getElementById('od-mat-list');
   matList.innerHTML = o.materiais.length === 0
@@ -4215,6 +4564,7 @@ openDB().then(function() {
   verificarRelogio();
   dispararNotificacoesLocais();
   registrarBotaoVoltar();
+  organizarPdfsEmPastas();
   diag('boot: app pronto · nativo=' + capNativo() + ' · IndexedDB=' + (_dbOk ? 'ok' : 'INDISPONÍVEL')
      + ' · plugins=[' + diagPlugins() + ']');
   sincronizarContatos();
