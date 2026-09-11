@@ -3851,6 +3851,290 @@ function adicionarMatOrc(id) {
 }
 
 /* ================================================================
+   ATUALIZAÇÃO DO APP (F8)
+
+   O app é distribuído por APK direto, fora da Play Store — não existe
+   ninguém avisando que saiu versão nova. Então ele mesmo pergunta, a cada
+   boot, para um manifesto publicado no GitHub Pages (o mesmo workflow que
+   já publica a pasta app/):
+
+     { "ultima": "1.8.0",        versão mais recente publicada
+       "minima": "1.7.0",        abaixo disto o app trava até atualizar
+       "notas":  "…",            o que mudou, em uma linha
+       "apk":    "https://…" }   o APK daquela release
+
+   `minima` é editada à mão no release que exige a troca — migração de
+   dados, correção de segurança, mudança de formato de backup. Nos outros
+   casos ela fica onde estava e o aviso é dispensável.
+
+   Falhar aqui nunca pode atrapalhar: sem rede, manifesto fora do ar ou
+   JSON quebrado, a checagem some em silêncio e o app abre normal.
+   ================================================================ */
+
+var MANIFESTO_VERSAO = 'https://erik-gastao.github.io/ElectricBudgetApp/versao.json';
+
+/* O `apk` do manifesto vai direto para um download e daí para o
+   instalador do Android. O manifesto vem da rede, então o endereço é
+   conferido contra o repositório de origem antes de qualquer coisa: um
+   manifesto adulterado não vai conseguir apontar o instalador para um
+   arquivo qualquer da internet. (A defesa final continua sendo o Android,
+   que recusa instalar por cima um APK assinado com outra chave.) */
+var _RE_APK_OFICIAL = /^https:\/\/github\.com\/erik-gastao\/ElectricBudgetApp\/releases\/download\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+\.apk$/;
+
+var PAGINA_RELEASES = 'https://github.com/erik-gastao/ElectricBudgetApp/releases/latest';
+
+/* "1.10.0" > "1.9.0": comparar número a número, nunca como texto. */
+function cmpVersao(a, b) {
+  var pa = String(a || '0').split('.');
+  var pb = String(b || '0').split('.');
+  for (var i = 0; i < 3; i++) {
+    var na = parseInt(pa[i], 10) || 0;
+    var nb = parseInt(pb[i], 10) || 0;
+    if (na !== nb) return na < nb ? -1 : 1;
+  }
+  return 0;
+}
+
+function pluginApp() {
+  return (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App) || null;
+}
+
+/* A versão instalada vem do próprio APK (versionName, que o CI deriva da
+   tag), não de uma constante no JS: uma constante desatualizaria sozinha
+   e passaria a mentir. No navegador não existe versão de APK — lá quem
+   atualiza é o service worker. */
+function versaoInstalada() {
+  var A = pluginApp();
+  if (!capNativo() || !A || typeof A.getInfo !== 'function') return Promise.resolve('');
+  return A.getInfo()
+    .then(function(i) { return (i && i.version) || ''; })
+    .catch(function(e) { diag('update: getInfo falhou', e); return ''; });
+}
+
+function buscarManifesto() {
+  if (typeof fetch !== 'function') return Promise.resolve(null);
+  var ctrl = (typeof AbortController === 'function') ? new AbortController() : null;
+  var timer = setTimeout(function() { if (ctrl) ctrl.abort(); }, 8000);
+  var opts = { cache: 'no-store' };
+  if (ctrl) opts.signal = ctrl.signal;
+  /* ?t= além do no-store: proxy de operadora ignora cabeçalho de cache,
+     e um manifesto velho aqui significa update que nunca aparece */
+  return fetch(MANIFESTO_VERSAO + '?t=' + Date.now(), opts)
+    .then(function(r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
+    .then(function(j) { clearTimeout(timer); return j; })
+    .catch(function(e) {
+      clearTimeout(timer);
+      diag('update: manifesto indisponível', e);
+      return null;
+    });
+}
+
+/* versão que o usuário mandou esperar — não insiste a cada boot */
+function versaoAdiada() {
+  if (!_dbOk) return Promise.resolve('');
+  return dbGet('preferencias', 'updateAdiado')
+    .then(function(p) { return (p && p.value) || ''; })
+    .catch(function() { return ''; });
+}
+
+var _update = null;
+
+/* `manual` = veio do botão em Meu Perfil: aí responde sempre, inclusive
+   "já está atualizado", e ignora o adiamento anterior. */
+function checarAtualizacao(manual) {
+  if (!capNativo()) {
+    if (manual) showToast('Atualização automática só no app Android.');
+    return Promise.resolve();
+  }
+  return versaoInstalada().then(function(atual) {
+    if (!atual) {
+      if (manual) showToast('Não foi possível ler a versão instalada.');
+      return;
+    }
+    return buscarManifesto().then(function(m) {
+      if (!m || !m.ultima) {
+        if (manual) showToast('Não foi possível consultar atualizações agora.');
+        return;
+      }
+      var obrigatoria = cmpVersao(atual, m.minima || '0.0.0') < 0;
+      var temNova = cmpVersao(atual, m.ultima) < 0;
+      diag('update: instalada=' + atual + ' · última=' + m.ultima
+         + ' · mínima=' + (m.minima || '—') + (obrigatoria ? ' · OBRIGATÓRIA' : ''));
+
+      if (!temNova) {
+        if (manual) showToast('Você já está na versão mais recente (' + atual + ').');
+        return;
+      }
+
+      _update = {
+        atual: atual,
+        ultima: String(m.ultima),
+        notas: String(m.notas || ''),
+        apk: _RE_APK_OFICIAL.test(String(m.apk || '')) ? String(m.apk) : '',
+        obrigatoria: obrigatoria
+      };
+      if (!_update.apk && m.apk) diag('update: endereço de APK recusado → ' + m.apk);
+
+      /* obrigatória ignora o adiamento: não há como dispensar */
+      if (obrigatoria || manual) { mostrarUpdate(); return; }
+      return versaoAdiada().then(function(v) {
+        if (v === _update.ultima) { diag('update: ' + v + ' adiada pelo usuário'); return; }
+        mostrarUpdate();
+      });
+    });
+  }).catch(function(e) {
+    diag('update: checagem falhou', e);
+    if (manual) showToast('Não foi possível consultar atualizações agora.');
+  });
+}
+
+function mostrarUpdate() {
+  var u = _update;
+  if (!u) return;
+  var modal = document.getElementById('update-modal');
+  if (!modal) return;
+
+  document.getElementById('update-titulo').textContent = u.obrigatoria
+    ? 'Atualização necessária'
+    : 'Nova versão disponível';
+  document.getElementById('update-msg').textContent = u.obrigatoria
+    ? 'A versão ' + u.ultima + ' precisa ser instalada para continuar usando o app. A sua é a ' + u.atual + '.'
+    : 'A versão ' + u.ultima + ' está disponível. A sua é a ' + u.atual + '.';
+
+  var notas = document.getElementById('update-notas');
+  notas.textContent = u.notas;
+  notas.style.display = u.notas ? 'block' : 'none';
+
+  /* obrigatória não tem saída: sem DEPOIS, e o voltar do Android também
+     não fecha (ver fecharModalAberto) */
+  document.getElementById('update-depois').style.display = u.obrigatoria ? 'none' : 'block';
+  document.getElementById('update-progresso').style.display = 'none';
+  document.getElementById('update-agora').disabled = false;
+  modal.classList.add('show');
+}
+
+function updateDepois() {
+  var u = _update;
+  document.getElementById('update-modal').classList.remove('show');
+  if (!u || u.obrigatoria || !_dbOk) return;
+  dbPut('preferencias', { key: 'updateAdiado', value: u.ultima })
+    .catch(function(e) { diag('update: não guardou o adiamento', e); });
+}
+
+/* Plano B quando o download embutido não rola: a página da release no
+   navegador. O usuário baixa e toca no arquivo — mais passos, mas sempre
+   funciona. */
+function abrirReleasesNoNavegador() {
+  var AL = pluginAppLauncher();
+  if (AL && typeof AL.openUrl === 'function') {
+    AL.openUrl({ url: PAGINA_RELEASES })
+      .catch(function(e) { diag('update: AppLauncher falhou', e); showToast('Abra ' + PAGINA_RELEASES); });
+    return;
+  }
+  showToast('Baixe a nova versão em ' + PAGINA_RELEASES);
+}
+
+function _progressoUpdate(txt) {
+  var el = document.getElementById('update-progresso');
+  if (!el) return;
+  el.textContent = txt;
+  el.style.display = 'block';
+}
+
+function baixarAtualizacao() {
+  var u = _update;
+  if (!u) return;
+  if (!u.apk) { abrirReleasesNoNavegador(); return; }
+
+  var FS = pluginFilesystem();
+  if (!FS || typeof FS.downloadFile !== 'function') {
+    diag('update: Filesystem sem downloadFile — caindo no navegador');
+    abrirReleasesNoNavegador();
+    return;
+  }
+
+  document.getElementById('update-agora').disabled = true;
+  _progressoUpdate('Baixando…');
+
+  var nome = 'electric-budget-' + u.ultima + '.apk';
+  var ouvinte = null;
+  if (typeof FS.addListener === 'function') {
+    try {
+      ouvinte = FS.addListener('progress', function(p) {
+        if (!p || !p.contentLength) return;
+        _progressoUpdate('Baixando… ' + Math.round(p.bytes / p.contentLength * 100) + '%');
+      });
+    } catch (e) { diag('update: sem progresso de download', e); }
+  }
+  var soltarOuvinte = function() {
+    if (!ouvinte) return;
+    Promise.resolve(ouvinte)
+      .then(function(h) { if (h && typeof h.remove === 'function') return h.remove(); })
+      .catch(function() {});
+    ouvinte = null;
+  };
+
+  /* CACHE: o APK não é documento do usuário e o sistema pode limpar
+     sozinho depois da instalação. Já está coberto pelo file_paths.xml,
+     então o FileProvider consegue entregar o content:// ao instalador. */
+  FS.downloadFile({ url: u.apk, path: nome, directory: 'CACHE', progress: true, recursive: true })
+    .then(function() { return FS.getUri({ path: nome, directory: 'CACHE' }); })
+    .then(function(r) {
+      soltarOuvinte();
+      var uri = r && r.uri;
+      if (!uri) throw new Error('sem uri do arquivo baixado');
+      _progressoUpdate('Abrindo o instalador…');
+      return abrirInstalador(uri, nome);
+    })
+    .catch(function(e) {
+      soltarOuvinte();
+      diag('update: download falhou', e);
+      _progressoUpdate('');
+      document.getElementById('update-progresso').style.display = 'none';
+      document.getElementById('update-agora').disabled = false;
+      showConfirm('Não foi possível baixar a atualização aqui. Abrir a página de download no navegador?',
+        abrirReleasesNoNavegador);
+    });
+}
+
+function abrirInstalador(uri, nome) {
+  var FO = pluginFileOpener();
+  if (!FO || typeof FO.open !== 'function') {
+    diag('update: FileOpener ausente — caindo no navegador');
+    abrirReleasesNoNavegador();
+    return Promise.resolve();
+  }
+  return FO.open({ filePath: uri, contentType: 'application/vnd.android.package-archive' })
+    .then(function() {
+      diag('update: instalador aberto para ' + nome);
+      /* o modal continua de pé: se o usuário cancelar a instalação, a
+         obrigatória segue bloqueando, como deve */
+      _progressoUpdate('Confirme a instalação na tela do Android.');
+      document.getElementById('update-agora').disabled = false;
+    })
+    .catch(function(e) {
+      diag('update: instalador recusou', e);
+      _progressoUpdate('');
+      document.getElementById('update-progresso').style.display = 'none';
+      document.getElementById('update-agora').disabled = false;
+      showConfirm('O Android não abriu o instalador. Isso costuma ser a permissão de "instalar apps desconhecidos". Abrir a página de download no navegador?',
+        abrirReleasesNoNavegador);
+    });
+}
+
+/* Meu Perfil: mostra a versão instalada e o botão de procurar */
+function renderVersaoApp() {
+  var el = document.getElementById('pe-versao');
+  if (!el) return;
+  versaoInstalada().then(function(v) {
+    el.textContent = v ? ('versão ' + v) : 'navegador (PWA)';
+  });
+}
+
+/* ================================================================
    PERFIL DO ELETRICISTA (F6.5)
    Persistido em preferencias; entra no cabeçalho dos PDFs.
    ================================================================ */
@@ -3881,6 +4165,7 @@ function renderPerfilEletricista() {
   setar('pe-doc', pe.documento);
   var av = document.getElementById('pe-avatar');
   if (av) av.textContent = iniciais(pe.nome);
+  renderVersaoApp();
 }
 
 function abrirEditarPerfil() {
@@ -4931,6 +5216,17 @@ function fecharModalAberto() {
   if (venc && venc.classList.contains('show')) { vencCancel(); return true; }
   var conf = document.getElementById('confirm-modal');
   if (conf && conf.classList.contains('show')) { confirmCancel(); return true; }
+  /* Por último de propósito: o aviso de atualização pode ter um confirm
+     por cima (o "abrir no navegador?" de quando o download falha), e o
+     voltar tem que fechar o de cima primeiro.
+     A atualização obrigatória é a única tela do app sem saída — devolve
+     true sem fechar nada, para o voltar não navegar nem sair do app. */
+  var upd = document.getElementById('update-modal');
+  if (upd && upd.classList.contains('show')) {
+    if (_update && _update.obrigatoria) return true;
+    updateDepois();
+    return true;
+  }
   return false;
 }
 
@@ -4940,7 +5236,7 @@ function fecharModalAberto() {
 var _saidaArmada = false;
 
 function registrarBotaoVoltar() {
-  var App = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
+  var App = pluginApp();
   if (App && App.addListener) {
     App.addListener('backButton', function() {
       if (navBack()) { _saidaArmada = false; return; }
@@ -5164,6 +5460,7 @@ openDB().then(function() {
   dispararNotificacoesLocais();
   registrarBotaoVoltar();
   organizarPdfsEmPastas();
+  checarAtualizacao();
   diag('boot: app pronto · nativo=' + capNativo() + ' · IndexedDB=' + (_dbOk ? 'ok' : 'INDISPONÍVEL')
      + ' · plugins=[' + diagPlugins() + ']');
   sincronizarContatos();

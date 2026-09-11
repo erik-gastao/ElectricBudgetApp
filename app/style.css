@@ -964,6 +964,17 @@
   .confirm-btn { flex: 1; padding: 11px; border: 1.5px solid #d0d0d0; background: #fff; border-radius: 10px; font-size: 13px; font-weight: 700; cursor: pointer; color: #555; text-transform: uppercase; }
   .confirm-btn.danger { background: #ef4444; border-color: #ef4444; color: #fff; }
 
+  /* MODAL DE ATUALIZAÇÃO */
+  .update-titulo { font-size: 16px; font-weight: 800; color: var(--ink); margin-bottom: 8px; text-align: center; }
+  .update-notas {
+    font-size: 12px; color: #6b5a46; line-height: 1.5;
+    background: var(--surface-alt); border: 1.5px solid #F0DDBB;
+    border-radius: 8px; padding: 10px 12px; margin-bottom: 14px;
+  }
+  .update-progresso { font-size: 12px; font-weight: 700; color: var(--brand-dark); margin-bottom: 12px; text-align: center; }
+  .confirm-btn:disabled { opacity: .55; cursor: default; }
+  .perfil-versao { font-size: 11px; color: #94785A; margin-top: 2px; }
+
   /* HOME SEARCH */
   .home-search { display: flex; align-items: center; background: #fff; border: 1.5px solid #e5d4b8; border-radius: 22px; padding: 8px 14px; gap: 8px; margin-bottom: 14px; }
   .home-search input { flex: 1; border: none; background: transparent; font-size: 14px; outline: none; color: var(--ink); }

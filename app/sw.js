@@ -5,7 +5,7 @@
    precisa ir à rede pra ler um header Date confiável.
    ================================================================ */
 
-var CACHE = 'electricbudget-v23';
+var CACHE = 'electricbudget-v24';
 
 var ASSETS = [
   './',
@@ -39,6 +39,15 @@ self.addEventListener('activate', function(e) {
 
 self.addEventListener('fetch', function(e) {
   if (e.request.method !== 'GET') return; /* HEAD do relógio passa direto */
+
+  /* Só o que é do próprio app entra no cache. O manifesto de versão e o
+     download do APK moram no github.io/github.com: guardar a resposta
+     deles aqui faria o app achar para sempre que a versão mais nova é a
+     que ele viu da primeira vez. */
+  var mesmaOrigem;
+  try { mesmaOrigem = new URL(e.request.url).origin === self.location.origin; }
+  catch (err) { mesmaOrigem = false; }
+  if (!mesmaOrigem) return;
 
   e.respondWith(
     caches.match(e.request, { ignoreSearch: true }).then(function(cached) {

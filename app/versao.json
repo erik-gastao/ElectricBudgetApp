@@ -1,0 +1,7 @@
+{
+  "_leia": "Manifesto de atualização do app. Publicado pelo GitHub Pages junto da pasta app/, em https://erik-gastao.github.io/ElectricBudgetApp/versao.json — o app consulta a cada abertura. 'ultima' é a versão publicada; 'minima' é o piso: quem estiver abaixo dela fica travado até atualizar, então só mexa nela quando a troca for mesmo obrigatória (migração de dados, correção crítica, mudança no formato do backup). Atualize este arquivo NO MESMO commit que vira a tag da release — o build falha de propósito se 'ultima' e 'apk' não baterem com a tag.",
+  "ultima": "1.8.0",
+  "minima": "0.0.0",
+  "notas": "O app passa a avisar sozinho quando sai versão nova, com download e instalação por dentro.",
+  "apk": "https://github.com/erik-gastao/ElectricBudgetApp/releases/download/v1.8.0/electric-budget-v1.8.0.apk"
+}

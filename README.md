@@ -57,6 +57,28 @@ Eletricista autônomo gerencia o negócio em caderno e planilha: orçamento feit
 
 > Primeiro acesso precisa de internet (o app se guarda no aparelho). Depois, offline total — inclusive a geração de PDF.
 
+### Atualizações
+
+O APK não passa pela Play Store, então o próprio app avisa. A cada abertura ele
+consulta `app/versao.json` (publicado junto do PWA) e compara com a versão
+instalada:
+
+| Situação | O que acontece |
+|---|---|
+| Versão nova disponível | Aviso dispensável. **DEPOIS** silencia aquela versão específica. |
+| Instalada abaixo de `minima` | Aviso **bloqueante** — o app não abre até atualizar. |
+| Sem internet / manifesto fora do ar | Nada. O app abre normal. |
+
+**ATUALIZAR AGORA** baixa o APK e chama o instalador do Android. Na primeira vez
+o sistema pede para autorizar "instalar apps desconhecidos" para o Electric
+Budget; se o instalador não abrir, o app oferece a página de Releases no
+navegador. Em *Meu Perfil* há a versão instalada e um botão para conferir na hora.
+
+**Ao publicar uma release:** atualize `ultima`, `notas` e `apk` em
+`app/versao.json` no mesmo commit que vira a tag — o build falha de propósito se
+eles não baterem. Mexa em `minima` só quando a troca for mesmo obrigatória
+(migração de dados, correção crítica, mudança no formato do backup).
+
 📄 [Exemplo de PDF gerado pelo app](docs/orcamento-exemplo.pdf)
 
 ## 🏗 Arquitetura

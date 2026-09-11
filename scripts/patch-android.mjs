@@ -68,6 +68,17 @@ const PERMISSOES = [
      alarme). Permissão install-time, sem prompt — o Relógio da Samsung
      recusa a intent sem ela. */
   'com.android.alarm.permission.SET_ALARM',
+
+  /* Atualização in-app. O app é distribuído por APK direto, fora da Play
+     Store, então ele mesmo baixa a versão nova e entrega ao instalador do
+     Android — e quem entrega um .apk ao instalador precisa desta.
+
+     Ela NÃO instala nada sozinha: o Android continua exigindo que o
+     usuário autorize "instalar apps desconhecidos" para o Electric Budget
+     (uma vez) e confirme cada instalação na tela do sistema. Sem a
+     permissão aqui o Intent volta como activity not found e o app cai no
+     plano B, que é abrir a página de releases no navegador. */
+  'android.permission.REQUEST_INSTALL_PACKAGES',
 ];
 
 /* Escrita na pasta pública Documentos. Da API 30 em diante o app já pode
@@ -112,6 +123,10 @@ const QUERIES = `    <queries>
         </intent>
         <intent>
             <action android:name="android.intent.action.SET_ALARM" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="application/vnd.android.package-archive" />
         </intent>
     </queries>
 `;

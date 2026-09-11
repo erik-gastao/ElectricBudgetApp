@@ -14,6 +14,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # app/versao.json é o que avisa os aparelhos já instalados de que
+      # saiu versão nova — o GitHub Pages o publica a partir da main. Se
+      # ele ficar atrás da tag, ninguém recebe o aviso; se for à frente,
+      # o app manda o instalador buscar um APK que não existe. Falhar
+      # aqui custa menos que publicar errado.
+      - name: Conferir app/versao.json contra a tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          ULTIMA=$(node -p "require('./app/versao.json').ultima")
+          APK=$(node -p "require('./app/versao.json').apk")
+          ESPERADO="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/electric-budget-${GITHUB_REF_NAME}.apk"
+          if [ "$ULTIMA" != "$TAG" ]; then
+            echo "::error::app/versao.json diz ultima=$ULTIMA, mas a tag e $TAG"
+            exit 1
+          fi
+          if [ "$APK" != "$ESPERADO" ]; then
+            echo "::error::app/versao.json aponta para $APK; esperado $ESPERADO"
+            exit 1
+          fi
+          echo "versao.json confere com ${GITHUB_REF_NAME}"
+
       - name: Node
         uses: actions/setup-node@v4
         with:
