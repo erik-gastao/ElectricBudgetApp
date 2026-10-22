@@ -4,6 +4,7 @@
   "description": "App de gestão para eletricistas autônomos — empacotamento Android via Capacitor.",
   "private": true,
   "scripts": {
+    "test": "node --test tests/*.test.js",
     "cap:add": "cap add android",
     "cap:sync": "cap sync android",
     "assets": "capacitor-assets generate --android"

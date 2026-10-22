@@ -992,6 +992,26 @@ function pluginFileOpener() {
 function pluginShare() {
   return (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Share) || null;
 }
+function pluginPdf() {
+  return (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.EbPdf) || null;
+}
+
+/* Envio do PDF pelo EbPdf (tipo application/pdf fixo — é o que faz o
+   WhatsApp mostrar a miniatura da 1ª página no chat). APK antigo sem o
+   plugin, ou falha nele, cai no Share do Capacitor. */
+function enviarPdfNativo(uri, nomeArq, titulo) {
+  var shareCapacitor = function() {
+    var SH = pluginShare();
+    if (!SH) return Promise.reject(new Error('Share ausente'));
+    return SH.share({ title: nomeArq, url: uri, dialogTitle: titulo });
+  };
+  var EP = pluginPdf();
+  if (!EP || typeof EP.compartilhar !== 'function') return shareCapacitor();
+  return EP.compartilhar({ url: uri, titulo: titulo }).catch(function(e) {
+    diag('pdf: EbPdf falhou, tentando Share', e);
+    return shareCapacitor();
+  });
+}
 
 /* ── NOME DO ARQUIVO ──
    Tira o que Android/FAT não aceitam em nome de arquivo. Sem isso uma
@@ -1239,10 +1259,8 @@ function entregarPdfNativo(doc, nomeArq, label, meta) {
 function abrirPdfNativo(uri, nomeArq, label) {
   var FO = pluginFileOpener();
   var compartilhar = function(motivo) {
-    var SH = pluginShare();
     diag('pdf: abrindo via Share (' + motivo + ')');
-    if (!SH) { showToast('PDF salvo: ' + nomeArq + '. Abra pelo gerenciador de arquivos.'); return; }
-    SH.share({ title: nomeArq, url: uri, dialogTitle: 'Abrir ou enviar ' + label })
+    enviarPdfNativo(uri, nomeArq, 'Abrir ou enviar ' + label)
       .catch(function(e) {
         diag('pdf: Share falhou', e);
         showToast('PDF salvo: ' + nomeArq + '. Abra pelo gerenciador de arquivos.');
@@ -1338,9 +1356,8 @@ function abrirArquivo(id) {
 function compartilharArquivo(id) {
   var a = arquivoById(id);
   if (!a) return;
-  var SH = pluginShare();
-  if (capNativo() && a.uri && SH) {
-    SH.share({ title: a.nome, url: a.uri, dialogTitle: 'Enviar ' + a.nome })
+  if (capNativo() && a.uri && (pluginPdf() || pluginShare())) {
+    enviarPdfNativo(a.uri, a.nome, 'Enviar ' + a.nome)
       .catch(function(e) { diag('arquivos: Share falhou', e); showToast('Não foi possível compartilhar.'); });
     return;
   }
@@ -3290,8 +3307,28 @@ function orcamentoById(id) {
 /* Subtotal SEMPRE revalidado dos itens (SPEC §4/§8), em centavos exatos */
 function subtotalOrcamento(o) {
   var tm = (o.materiais || []).reduce(function(s, m) { return s + round2(m.preco * m.qty); }, 0);
-  var tb = (o.maoDeObra || []).reduce(function(s, m) { return s + Number(m.valor); }, 0);
+  var tb = (o.maoDeObra || []).reduce(function(s, m) { return s + totalItemMob(m); }, 0);
   return round2(tm + tb);
+}
+
+/* Item de mão de obra pode ter quantidade: serviço avulso com material
+   que não vale cadastrar (3 sacos de cimento, 40 tijolos). `valor` é o
+   unitário; itens antigos não têm `qty` e valem 1. */
+function qtyMob(m) {
+  var q = Number(m && m.qty);
+  return q > 0 ? q : 1;
+}
+/* `adicional` é um acréscimo em R$ na linha inteira, por cima do preço de
+   tabela — tomada atrás de armário, forro baixo, acesso difícil. */
+function adicionalMob(m) {
+  var a = Number(m && m.adicional);
+  return a > 0 ? round2(a) : 0;
+}
+function totalItemMob(m) {
+  return round2(Number(m.valor) * qtyMob(m) + adicionalMob(m));
+}
+function totalMaoDeObra(lista) {
+  return round2((lista || []).reduce(function(s, m) { return s + totalItemMob(m); }, 0));
 }
 
 /* ── DESCONTO / ARREDONDAMENTO ──
@@ -3387,9 +3424,13 @@ function renderOrcamento() {
       mobList.innerHTML = '<div style="color:#aaa;font-size:13px;padding:8px 0;">Nenhum item adicionado.</div>';
     } else {
       mobList.innerHTML = orcamentoAtual.maoDeObra.map(function(m, i) {
-        return '<div class="orc-item-row" style="grid-template-columns:1fr 78px 22px 20px;">'
-          + '<div class="orc-item-nome">' + esc(m.nome) + '</div>'
-          + '<div class="orc-item-total">R$ ' + m.valor.toFixed(2).replace('.', ',') + '</div>'
+        var adic = adicionalMob(m) > 0 ? ' + ' + fmtBR(adicionalMob(m)) + ' adicional' : '';
+        return '<div class="orc-item-row" style="grid-template-columns:1fr 50px 78px 22px 20px;">'
+          + '<div><div class="orc-item-nome">' + esc(m.nome) + '</div><div class="orc-item-preco">R$ ' + m.valor.toFixed(2).replace('.', ',') + ' / un.' + adic + '</div></div>'
+          + '<input class="orc-qty-input" type="number" inputmode="decimal" step="0.25" min="0.01" max="99999"'
+          + ' value="' + qtyMob(m) + '" aria-label="Quantidade de ' + esc(m.nome) + '"'
+          + ' onchange="alterarQtdMobOrc(' + i + ', this.value)">'
+          + '<div class="orc-item-total">R$ ' + totalItemMob(m).toFixed(2).replace('.', ',') + '</div>'
           + '<div class="orc-item-edit" onclick="editarMobOrc(' + i + ')" role="button" aria-label="Editar ' + esc(m.nome) + '">✎</div>'
           + '<div class="orc-item-x" onclick="removerMobOrc(' + i + ')" role="button" aria-label="Remover item">✕</div>'
           + '</div>';
@@ -3408,7 +3449,7 @@ function renderOrcamento() {
   if (btnPdf) btnPdf.textContent = revisando ? 'SALVAR REVISÃO' : 'SALVAR PDF';
 
   var totalMat = orcamentoAtual.materiais.reduce(function(s, m) { return s + round2(m.preco * m.qty); }, 0);
-  var totalMob = orcamentoAtual.maoDeObra.reduce(function(s, m) { return s + m.valor; }, 0);
+  var totalMob = totalMaoDeObra(orcamentoAtual.maoDeObra);
   var el = document.getElementById('orc-total-mat'); if (el) el.textContent = fmtBR(totalMat);
   var el2 = document.getElementById('orc-total-mob'); if (el2) el2.textContent = fmtBR(totalMob);
 
@@ -3420,6 +3461,13 @@ function renderOrcamento() {
    destrutiva e tem confirmação própria. */
 function alterarQtdMatOrc(i, valor) {
   var item = orcamentoAtual.materiais[i];
+  if (!item) return;
+  item.qty = normQty(valor);
+  renderOrcamento();
+}
+
+function alterarQtdMobOrc(i, valor) {
+  var item = orcamentoAtual.maoDeObra[i];
   if (!item) return;
   item.qty = normQty(valor);
   renderOrcamento();
@@ -3455,6 +3503,8 @@ function fecharFormMob() {
   if (b) b.textContent = 'OK';
   var n = document.getElementById('mob-nome-input'); if (n) n.value = '';
   var v = document.getElementById('mob-valor-input'); if (v) v.value = '';
+  var q = document.getElementById('mob-qty-input'); if (q) q.value = '1';
+  var a = document.getElementById('mob-adic-input'); if (a) a.value = '';
 }
 
 function toggleFormMob() {
@@ -3465,6 +3515,7 @@ function toggleFormMob() {
   if (f.style.display !== 'none' && _mobEditIdx === null) { fecharFormMob(); return; }
   fecharFormMob();
   f.style.display = 'block';
+  renderServicosTabela();
   var n = document.getElementById('mob-nome-input');
   if (n) n.focus();
 }
@@ -3476,8 +3527,11 @@ function editarMobOrc(i) {
   _mobEditIdx = i;
   document.getElementById('mob-nome-input').value = m.nome;
   document.getElementById('mob-valor-input').value = numeroParaMoeda(m.valor);
+  document.getElementById('mob-qty-input').value = qtyMob(m);
+  document.getElementById('mob-adic-input').value = adicionalMob(m) > 0 ? numeroParaMoeda(adicionalMob(m)) : '';
   var f = document.getElementById('orc-mob-form');
   if (f) f.style.display = 'block';
+  renderServicosTabela();
   var t = document.getElementById('orc-mob-form-title');
   if (t) { t.style.display = 'block'; t.textContent = 'EDITANDO: ' + m.nome; }
   var b = document.getElementById('mob-ok-btn');
@@ -3488,14 +3542,90 @@ function editarMobOrc(i) {
 function adicionarMobOrc() {
   var nome = document.getElementById('mob-nome-input').value.trim();
   var valor = moedaParaNumero(document.getElementById('mob-valor-input').value);
+  var qty = normQty(document.getElementById('mob-qty-input').value);
+  var adic = moedaParaNumero(document.getElementById('mob-adic-input').value);
   if (!nome || isNaN(valor) || valor <= 0) return;
+  var item = { nome: nome, valor: round2(valor), qty: qty };
+  if (adic > 0) item.adicional = round2(adic);
   if (_mobEditIdx !== null && orcamentoAtual.maoDeObra[_mobEditIdx]) {
-    orcamentoAtual.maoDeObra[_mobEditIdx] = { nome: nome, valor: round2(valor) };
+    orcamentoAtual.maoDeObra[_mobEditIdx] = item;
   } else {
-    orcamentoAtual.maoDeObra.push({ nome: nome, valor: round2(valor) });
+    orcamentoAtual.maoDeObra.push(item);
   }
   fecharFormMob();
   renderOrcamento();
+}
+
+/* ── SERVIÇOS TABELADOS ──
+   Tabela de preço fixo do eletricista ("Troca de tomada · R$ 30"). Fica em
+   `preferencias` como as categorias: lista curta, sem índice, e o backup
+   já carrega preferências. Tocar no serviço só PREENCHE o formulário — o
+   item do orçamento guarda nome e preço copiados, então mudar a tabela
+   depois não altera orçamento já feito. */
+
+var servicosTabela = [];
+
+function carregarServicosTabela() {
+  if (!_dbOk) return Promise.resolve();
+  return dbGet('preferencias', 'servicos').then(function(p) {
+    servicosTabela = (p && Array.isArray(p.value)) ? p.value.slice() : [];
+  }).catch(function() {});
+}
+
+function salvarServicosTabela() {
+  renderServicosTabela();
+  if (!_dbOk) return Promise.resolve();
+  return dbPut('preferencias', { key: 'servicos', value: servicosTabela })
+    .catch(function(e) { console.error('servicos', e); showToast(ERRO_SALVAR); });
+}
+
+function renderServicosTabela() {
+  var box = document.getElementById('mob-tabela');
+  if (!box) return;
+  if (servicosTabela.length === 0) {
+    box.innerHTML = '<div class="serv-vazio">Nenhum serviço tabelado. Preencha descrição e valor e toque em "SALVAR NA TABELA".</div>';
+    return;
+  }
+  box.innerHTML = servicosTabela.map(function(s, i) {
+    return '<span class="serv-chip">'
+      + '<span class="serv-chip-txt" onclick="usarServicoTabela(' + i + ')" role="button">'
+      +   esc(s.nome) + ' · ' + fmtBR(s.valor) + '</span>'
+      + '<span class="serv-chip-x" onclick="removerServicoTabela(' + i + ')" role="button" aria-label="Tirar ' + esc(s.nome) + ' da tabela">✕</span>'
+      + '</span>';
+  }).join('');
+}
+
+function usarServicoTabela(i) {
+  var s = servicosTabela[i];
+  if (!s) return;
+  document.getElementById('mob-nome-input').value = s.nome;
+  document.getElementById('mob-valor-input').value = numeroParaMoeda(s.valor);
+  var q = document.getElementById('mob-qty-input');
+  q.focus(); q.select();
+}
+
+/* mesmo nome (sem diferenciar maiúsculas) atualiza o preço em vez de
+   duplicar — é assim que se reajusta a tabela */
+function salvarServicoNaTabela() {
+  var nome = document.getElementById('mob-nome-input').value.trim();
+  var valor = moedaParaNumero(document.getElementById('mob-valor-input').value);
+  if (!nome || isNaN(valor) || valor <= 0) { showToast('Preencha descrição e valor do serviço.'); return; }
+  var chave = nome.toUpperCase();
+  var existente = servicosTabela.filter(function(s) { return s.nome.toUpperCase() === chave; })[0];
+  if (existente) existente.valor = round2(valor);
+  else servicosTabela.push({ nome: nome, valor: round2(valor) });
+  servicosTabela.sort(function(a, b) { return a.nome.localeCompare(b.nome, 'pt-BR'); });
+  salvarServicosTabela();
+  showToast(existente ? 'Preço da tabela atualizado.' : 'Serviço salvo na tabela.');
+}
+
+function removerServicoTabela(i) {
+  var s = servicosTabela[i];
+  if (!s) return;
+  showConfirm('Tirar "' + s.nome + '" da tabela? Orçamentos já feitos não mudam.', function() {
+    servicosTabela.splice(i, 1);
+    salvarServicosTabela();
+  });
 }
 
 /* ── FOTOS ANEXAS AO ORÇAMENTO ──
@@ -4326,7 +4456,7 @@ function gerarPdfOrcamento(o, nomeForcado) {
       doc.text(fmtQty(m.qty) + (m.unit === 'metro' ? ' m' : ''), 130, y, { align: 'right' });
       doc.text(moedaPdf(m.preco), 160, y, { align: 'right' });
       doc.setFont('helvetica', 'bold');
-      doc.text(moedaPdf(m.preco * m.qty), W - M, y, { align: 'right' });
+      doc.text(moedaPdf(round2(m.preco * m.qty)), W - M, y, { align: 'right' });
       y += 5.5;
     });
     y += 4;
@@ -4340,17 +4470,33 @@ function gerarPdfOrcamento(o, nomeForcado) {
       quebraPagina(6);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(30, 30, 30);
-      doc.text(String(m.nome).slice(0, 70), M, y);
+      /* só item com quantidade mostra QTD/unitário; serviço comum (qtd 1)
+         continua numa linha só, como sempre foi */
+      var temQtd = qtyMob(m) !== 1;
+      doc.text(String(m.nome).slice(0, temQtd ? 55 : 70), M, y);
+      if (temQtd) {
+        doc.text(fmtQty(qtyMob(m)), 130, y, { align: 'right' });
+        doc.text(moedaPdf(m.valor), 160, y, { align: 'right' });
+      }
       doc.setFont('helvetica', 'bold');
-      doc.text(moedaPdf(m.valor), W - M, y, { align: 'right' });
+      doc.text(moedaPdf(totalItemMob(m)), W - M, y, { align: 'right' });
       y += 5.5;
+      /* o cliente vê que o total da linha passa do preço de tabela e por quê */
+      if (adicionalMob(m) > 0) {
+        quebraPagina(5);
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
+        doc.setTextColor(120, 110, 95);
+        doc.text('inclui adicional de ' + moedaPdf(adicionalMob(m)) + ' (complexidade do serviço)', M + 3, y - 1);
+        doc.setFontSize(9);
+        y += 4;
+      }
     });
     y += 4;
   }
 
   /* totais — sempre revalidados dos itens (§8) */
-  var totalMat = o.materiais.reduce(function(s, m) { return s + m.preco * m.qty; }, 0);
-  var totalMob = o.maoDeObra.reduce(function(s, m) { return s + m.valor; }, 0);
+  var totalMat = round2(o.materiais.reduce(function(s, m) { return s + round2(m.preco * m.qty); }, 0));
+  var totalMob = totalMaoDeObra(o.maoDeObra);
   var subtotal = round2(totalMat + totalMob);
   var abatimento = descontoOrcamento(o);
   /* o desconto ocupa duas linhas a mais na caixa (a dele e a do subtotal) */
@@ -4427,7 +4573,7 @@ function gerarPdfOrcamento(o, nomeForcado) {
   entregarPdf(doc, nomeForcado || nomeArq, 'o orçamento', {
     tipo: 'orcamento',
     refId: o.id,
-    titulo: (c ? c.nome : 'Cliente') + ' - ' + fmtBR(totalMat + totalMob),
+    titulo: (c ? c.nome : 'Cliente') + ' - ' + fmtBR(round2(subtotal - abatimento)),
     semPerguntar: !!nomeForcado
   });
   return true;
@@ -4505,13 +4651,15 @@ function saveOrcamento(status, gerarPdf) {
     sincronizarStatusPagamento(pagNovo);
   }
 
-  var idx = -1;
-  for (var i = 0; i < orcamentos.length; i++) if (orcamentos[i].id === orc.id) idx = i;
-  if (idx >= 0) orcamentos[idx] = orc; else orcamentos.push(orc);
-  _orcEditId = null;
-  _orcEditStatus = null;
-
+  /* memória e estado de edição só mudam depois que o disco confirmou: se a
+     gravação falhar, o formulário segue aberto sobre o MESMO orçamento e um
+     novo toque em salvar não duplica nem pula a revisão */
   var concluir = function() {
+    var idx = -1;
+    for (var i = 0; i < orcamentos.length; i++) if (orcamentos[i].id === orc.id) idx = i;
+    if (idx >= 0) orcamentos[idx] = orc; else orcamentos.push(orc);
+    _orcEditId = null;
+    _orcEditStatus = null;
     var pdfOk = false;
     if (gerarPdf) {
       try { pdfOk = gerarPdfOrcamento(orc); }
@@ -4681,15 +4829,19 @@ function renderOrcDetalhe() {
   mobList.innerHTML = o.maoDeObra.length === 0
     ? '<div style="color:#aaa;font-size:13px;padding:8px 0;">Sem mão de obra.</div>'
     : o.maoDeObra.map(function(m) {
+        var partes = [];
+        if (qtyMob(m) !== 1) partes.push(fmtQty(qtyMob(m)) + ' × R$ ' + m.valor.toFixed(2).replace('.', ','));
+        if (adicionalMob(m) > 0) partes.push('+ ' + fmtBR(adicionalMob(m)) + ' adicional');
+        var detalhe = partes.length ? '<div class="orc-item-preco">' + partes.join(' ') + '</div>' : '';
         return '<div class="orc-item-row" style="grid-template-columns:1fr 90px 20px;">'
-          + '<div class="orc-item-nome">' + esc(m.nome) + '</div>'
-          + '<div class="orc-item-total">R$ ' + m.valor.toFixed(2).replace('.', ',') + '</div>'
+          + '<div><div class="orc-item-nome">' + esc(m.nome) + '</div>' + detalhe + '</div>'
+          + '<div class="orc-item-total">R$ ' + totalItemMob(m).toFixed(2).replace('.', ',') + '</div>'
           + '<div></div>'
           + '</div>';
       }).join('');
 
   var tm = o.materiais.reduce(function(s, m) { return s + round2(m.preco * m.qty); }, 0);
-  var tb = o.maoDeObra.reduce(function(s, m) { return s + m.valor; }, 0);
+  var tb = totalMaoDeObra(o.maoDeObra);
   var sub = subtotalOrcamento(o);
   var abat = descontoOrcamento(o);
   document.getElementById('od-total-mat').textContent = fmtBR(tm);
@@ -5342,7 +5494,7 @@ function exportarBackup() {
     orcamentos: orcamentos,
     agendamentos: agendamentos,
     pagamentos: pagamentos,
-    preferencias: { perfil: perfilEletricista, categorias: categorias }
+    preferencias: { perfil: perfilEletricista, categorias: categorias, servicos: servicosTabela }
   };
 
   var total = BACKUP_STORES.reduce(function(s, k) { return s + (dados[k] || []).length; }, 0);
@@ -5413,10 +5565,13 @@ function aplicarBackup(dados) {
   if (Array.isArray(prefs.categorias) && prefs.categorias.length) {
     itens.push({ store: 'preferencias', obj: { key: 'categorias', value: prefs.categorias } });
   }
+  if (Array.isArray(prefs.servicos) && prefs.servicos.length) {
+    itens.push({ store: 'preferencias', obj: { key: 'servicos', value: prefs.servicos } });
+  }
 
   dbPutMany(itens).then(function() {
     /* re-hidrata da fonte de verdade em vez de remendar a memória */
-    return loadAll().then(carregarPerfilEletricista).then(carregarCategorias);
+    return loadAll().then(carregarPerfilEletricista).then(carregarCategorias).then(carregarServicosTabela);
   }).then(function() {
     refreshPickerBotoes();
     renderHomeAgenda();
@@ -5438,7 +5593,7 @@ function aplicarBackup(dados) {
 openDB().then(function() {
   _dbOk = true;
   return seedIfEmpty().then(limparDadosExemploUmaVez).then(loadAll)
-    .then(carregarPerfilEletricista).then(carregarCategorias);
+    .then(carregarPerfilEletricista).then(carregarCategorias).then(carregarServicosTabela);
 }).catch(function(e) {
   console.error('IndexedDB indisponível:', e);
   _dbOk = false;

@@ -315,9 +315,69 @@ public class EbRelogioPlugin extends Plugin {
 }
 `;
 
+/* ── 4b. Plugin EbPdf ──
+   Envio do PDF com tipo FIXO application/pdf. O Share do Capacitor deduz o
+   tipo pelo nome (MimeTypeMap.getFileExtensionFromUrl), cai em "*\/*" com
+   nome fora do padrão e ainda anexa um ClipData "text/uri-list". Recebendo
+   isso o WhatsApp trata como arquivo genérico: só ícone, sem a miniatura
+   da primeira página no chat. */
+
+const PLUGIN_PDF_JAVA = `package ${APP_ID};
+
+import android.content.ClipData;
+import android.content.Intent;
+import android.net.Uri;
+
+import androidx.core.content.FileProvider;
+
+import com.getcapacitor.Plugin;
+import com.getcapacitor.PluginCall;
+import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.CapacitorPlugin;
+
+import java.io.File;
+
+/** Compartilha PDF como application/pdf. Gerado por scripts/patch-android.mjs. */
+@CapacitorPlugin(name = "EbPdf")
+public class EbPdfPlugin extends Plugin {
+
+    @PluginMethod
+    public void compartilhar(PluginCall call) {
+        String url = call.getString("url");
+        if (url == null || !url.startsWith("file:")) {
+            call.reject("url de arquivo invalida");
+            return;
+        }
+        try {
+            File f = new File(Uri.parse(url).getPath());
+            if (!f.exists()) {
+                call.reject("arquivo nao encontrado");
+                return;
+            }
+            // mesma authority que o Capacitor declara no manifest
+            Uri uri = FileProvider.getUriForFile(getContext(), getContext().getPackageName() + ".fileprovider", f);
+
+            Intent send = new Intent(Intent.ACTION_SEND);
+            send.setType("application/pdf");
+            send.putExtra(Intent.EXTRA_STREAM, uri);
+            send.setClipData(new ClipData(f.getName(), new String[] { "application/pdf" }, new ClipData.Item(uri)));
+            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+            Intent chooser = Intent.createChooser(send, call.getString("titulo", "Enviar PDF"));
+            chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            getActivity().startActivity(chooser);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Falha ao compartilhar: " + e.getMessage());
+        }
+    }
+}
+`;
+
 function patchPluginRelogio() {
   mkdirSync(PKG_DIR, { recursive: true });
   writeFileSync(`${PKG_DIR}/EbRelogioPlugin.java`, PLUGIN_JAVA);
+  writeFileSync(`${PKG_DIR}/EbPdfPlugin.java`, PLUGIN_PDF_JAVA);
 
   const main = `${PKG_DIR}/MainActivity.java`;
   if (!existsSync(main)) {
@@ -338,6 +398,7 @@ function patchPluginRelogio() {
     @Override
     public void onCreate(android.os.Bundle savedInstanceState) {
         registerPlugin(EbRelogioPlugin.class);
+        registerPlugin(EbPdfPlugin.class);
         super.onCreate(savedInstanceState);
 
         // Zoom desligado na marra. O meta viewport com user-scalable=no
@@ -357,7 +418,7 @@ function patchPluginRelogio() {
     return;
   }
   writeFileSync(main, java);
-  console.log('✓ EbRelogioPlugin.java escrito e registrado no MainActivity');
+  console.log('✓ EbRelogioPlugin.java e EbPdfPlugin.java escritos e registrados no MainActivity');
 }
 
 /* ── 5. Assinatura de release ── */
