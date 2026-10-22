@@ -10,7 +10,9 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Fixo em 24.04: com o ubuntu-latest migrando para o Ubuntu 26
+    # (out/2026), o setup-android@v3 passou a falhar na instalação do SDK.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
