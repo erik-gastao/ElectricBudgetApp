@@ -10,9 +10,7 @@ permissions:
 
 jobs:
   build:
-    # Fixo em 24.04: com o ubuntu-latest migrando para o Ubuntu 26
-    # (out/2026), o setup-android@v3 passou a falhar na instalação do SDK.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -49,8 +47,10 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      # v4: a v3 instala o pacote "tools", que o Google tirou do
+      # repositório do SDK (set/2026) — a etapa passou a falhar sempre.
       - name: Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Instalar Capacitor
         run: npm install
