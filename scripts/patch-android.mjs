@@ -166,6 +166,20 @@ function patchManifest() {
     xml = xml.replace('</manifest>', `${QUERIES}</manifest>`);
   }
 
+  /* provider do EbPdf (ver 4b) — mesmas raízes do FileProvider do Capacitor */
+  if (!xml.includes('.EbPdfProvider')) {
+    xml = xml.replace('</application>', `    <provider
+            android:name=".EbPdfProvider"
+            android:authorities="\${applicationId}.ebpdf"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+    </application>`);
+  }
+
   writeFileSync(MANIFEST, xml);
   console.log('✓ AndroidManifest.xml: permissões + queries aplicadas');
 }
@@ -319,8 +333,83 @@ public class EbRelogioPlugin extends Plugin {
    Envio do PDF com tipo FIXO application/pdf. O Share do Capacitor deduz o
    tipo pelo nome (MimeTypeMap.getFileExtensionFromUrl), cai em "*\/*" com
    nome fora do padrão e ainda anexa um ClipData "text/uri-list". Recebendo
-   isso o WhatsApp trata como arquivo genérico: só ícone, sem a miniatura
-   da primeira página no chat. */
+   isso o WhatsApp trata como arquivo genérico.
+
+   Só o tipo não bastou (v1.9.2): o MESMO arquivo, compartilhado pelo app
+   Arquivos, ganha a prévia da página no WhatsApp; saindo pelo FileProvider,
+   só o ícone. A diferença é que aquele provedor responde ao pedido de
+   miniatura (ContentResolver.loadThumbnail → openTypedAssetFile "image/*")
+   e o FileProvider não. O EbPdfProvider é um FileProvider que responde:
+   desenha a página 1 com o PdfRenderer do próprio Android. */
+
+const PROVIDER_PDF_JAVA = `package ${APP_ID};
+
+import android.content.ClipDescription;
+import android.content.res.AssetFileDescriptor;
+import android.graphics.Bitmap;
+import android.graphics.Color;
+import android.graphics.Point;
+import android.graphics.pdf.PdfRenderer;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.ParcelFileDescriptor;
+
+import androidx.core.content.FileProvider;
+
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+
+/** FileProvider que tambem entrega a miniatura da 1a pagina do PDF.
+ *  Gerado por scripts/patch-android.mjs. */
+public class EbPdfProvider extends FileProvider {
+
+    private static final String PNG = "image/png";
+
+    private boolean ehPdf(Uri uri) {
+        return "application/pdf".equals(getType(uri));
+    }
+
+    @Override
+    public String[] getStreamTypes(Uri uri, String mimeTypeFilter) {
+        if (ehPdf(uri) && ClipDescription.compareMimeTypes(PNG, mimeTypeFilter)) {
+            return new String[] { PNG };
+        }
+        return super.getStreamTypes(uri, mimeTypeFilter);
+    }
+
+    @Override
+    public AssetFileDescriptor openTypedAssetFile(Uri uri, String mimeTypeFilter, Bundle opts)
+            throws FileNotFoundException {
+        if (!ehPdf(uri) || !ClipDescription.compareMimeTypes(PNG, mimeTypeFilter)) {
+            return super.openTypedAssetFile(uri, mimeTypeFilter, opts);
+        }
+        int largura = 720;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && opts != null) {
+            Point p = opts.getParcelable(android.content.ContentResolver.EXTRA_SIZE);
+            if (p != null && p.x > 0) largura = Math.min(Math.max(p.x, 256), 1440);
+        }
+        File saida = new File(getContext().getCacheDir(), "ebpdf-thumb-" + Math.abs(uri.toString().hashCode()) + ".png");
+        try (ParcelFileDescriptor pfd = openFile(uri, "r");
+             PdfRenderer renderer = new PdfRenderer(pfd);
+             PdfRenderer.Page pagina = renderer.openPage(0)) {
+            int altura = Math.round(largura * (float) pagina.getHeight() / pagina.getWidth());
+            Bitmap bmp = Bitmap.createBitmap(largura, altura, Bitmap.Config.ARGB_8888);
+            bmp.eraseColor(Color.WHITE);   // PDF sem fundo sairia transparente
+            pagina.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+            try (FileOutputStream out = new FileOutputStream(saida)) {
+                bmp.compress(Bitmap.CompressFormat.PNG, 100, out);
+            }
+            bmp.recycle();
+        } catch (Exception e) {
+            throw new FileNotFoundException("miniatura do PDF falhou: " + e.getMessage());
+        }
+        return new AssetFileDescriptor(
+            ParcelFileDescriptor.open(saida, ParcelFileDescriptor.MODE_READ_ONLY), 0, AssetFileDescriptor.UNKNOWN_LENGTH);
+    }
+}
+`;
 
 const PLUGIN_PDF_JAVA = `package ${APP_ID};
 
@@ -354,8 +443,8 @@ public class EbPdfPlugin extends Plugin {
                 call.reject("arquivo nao encontrado");
                 return;
             }
-            // mesma authority que o Capacitor declara no manifest
-            Uri uri = FileProvider.getUriForFile(getContext(), getContext().getPackageName() + ".fileprovider", f);
+            // provider próprio (EbPdfProvider): entrega também a miniatura
+            Uri uri = FileProvider.getUriForFile(getContext(), getContext().getPackageName() + ".ebpdf", f);
 
             Intent send = new Intent(Intent.ACTION_SEND);
             send.setType("application/pdf");
@@ -378,6 +467,7 @@ function patchPluginRelogio() {
   mkdirSync(PKG_DIR, { recursive: true });
   writeFileSync(`${PKG_DIR}/EbRelogioPlugin.java`, PLUGIN_JAVA);
   writeFileSync(`${PKG_DIR}/EbPdfPlugin.java`, PLUGIN_PDF_JAVA);
+  writeFileSync(`${PKG_DIR}/EbPdfProvider.java`, PROVIDER_PDF_JAVA);
 
   const main = `${PKG_DIR}/MainActivity.java`;
   if (!existsSync(main)) {
