@@ -74,6 +74,11 @@ o sistema pede para autorizar "instalar apps desconhecidos" para o Electric
 Budget; se o instalador não abrir, o app oferece a página de Releases no
 navegador. Em *Meu Perfil* há a versão instalada e um botão para conferir na hora.
 
+Além do aviso dentro do app, sai uma notificação na barra (uma por versão) com o
+botão **ATUALIZAR**, que faz o mesmo download e instalação em um toque. A checagem
+roda na abertura e ao voltar o app para a frente (no máximo a cada 6 h). A
+confirmação final do instalador é do Android e não pode ser pulada.
+
 **Ao publicar uma release:** atualize `ultima`, `notas` e `apk` em
 `app/versao.json` no mesmo commit que vira a tag — o build falha de propósito se
 eles não baterem. Mexa em `minima` só quando a troca for mesmo obrigatória

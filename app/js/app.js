@@ -4095,6 +4095,9 @@ function checarAtualizacao(manual) {
          + ' · mínima=' + (m.minima || '—') + (obrigatoria ? ' · OBRIGATÓRIA' : ''));
 
       if (!temNova) {
+        /* acabou de instalar: o aviso da versão antiga não vale mais */
+        cancelarNotifUpdate();
+        _updatePeloAviso = false;
         if (manual) showToast('Você já está na versão mais recente (' + atual + ').');
         return;
       }
@@ -4108,6 +4111,10 @@ function checarAtualizacao(manual) {
       };
       if (!_update.apk && m.apk) diag('update: endereço de APK recusado → ' + m.apk);
 
+      /* a notificação sai mesmo com o modal: ele some no DEPOIS, ela fica
+         na barra e atualiza em um toque quando for conveniente */
+      notificarUpdate(_update);
+
       /* obrigatória ignora o adiamento: não há como dispensar */
       if (obrigatoria || manual) { mostrarUpdate(); return; }
       return versaoAdiada().then(function(v) {
@@ -4118,6 +4125,84 @@ function checarAtualizacao(manual) {
   }).catch(function(e) {
     diag('update: checagem falhou', e);
     if (manual) showToast('Não foi possível consultar atualizações agora.');
+  });
+}
+
+/* ── AVISO NA BARRA DE NOTIFICAÇÕES ──
+   Notificação com botão ATUALIZAR: o toque traz o app pra frente, baixa o
+   APK e abre o instalador — o mesmo caminho do modal. A confirmação final
+   ("Atualizar este app?") é do Android e não tem como pular: fora da Play
+   Store, nenhum app instala outro APK sem o usuário aprovar.
+
+   Sai uma vez por versão (`updateNotificado`), senão cada abertura do app
+   empilharia o mesmo aviso. */
+
+var CANAL_UPDATE = 'eb-update';
+var NOTIF_UPDATE_ID = 1000001;          /* fora da faixa dos agendamentos (< 1.000.000) */
+var ACAO_UPDATE = 'EB_UPDATE';
+var _updatePeloAviso = false;           /* tocou no aviso antes da checagem terminar */
+
+function prepararNotifUpdate() {
+  var LN = pluginLN();
+  if (!capNativo() || !LN) return;
+  if (typeof LN.registerActionTypes === 'function') {
+    LN.registerActionTypes({ types: [{ id: ACAO_UPDATE, actions: [{ id: 'atualizar', title: 'ATUALIZAR' }] }] })
+      .catch(function(e) { diag('update: não registrou a ação da notificação', e); });
+  }
+  if (typeof LN.addListener === 'function') {
+    LN.addListener('localNotificationActionPerformed', function(ev) {
+      var n = ev && ev.notification;
+      if (!n || !n.extra || n.extra.tipo !== 'update') return;
+      diag('update: aviso tocado (' + ev.actionId + ')');
+      /* tocar no corpo também atualiza — é o que se espera do aviso */
+      if (_update) { mostrarUpdate(); baixarAtualizacao(); }
+      else _updatePeloAviso = true;
+    });
+  }
+}
+
+function notificarUpdate(u) {
+  var LN = pluginLN();
+  if (!capNativo() || !LN || !u || !_dbOk) return;
+  dbGet('preferencias', 'updateNotificado').then(function(p) {
+    if (_updatePeloAviso) { _updatePeloAviso = false; mostrarUpdate(); baixarAtualizacao(); return; }
+    if (p && p.value === u.ultima) return;
+    var canal = typeof LN.createChannel === 'function'
+      ? LN.createChannel({ id: CANAL_UPDATE, name: 'Atualizações do app',
+          description: 'Avisa quando sai versão nova do Electric Budget.', importance: 4, visibility: 1 })
+      : Promise.resolve();
+    return canal.then(function() {
+      return LN.schedule({ notifications: [{
+        id: NOTIF_UPDATE_ID,
+        title: u.obrigatoria ? 'Atualização necessária' : 'Nova versão ' + u.ultima + ' disponível',
+        body: u.notas || 'Toque em ATUALIZAR para instalar.',
+        channelId: CANAL_UPDATE,
+        actionTypeId: ACAO_UPDATE,
+        extra: { tipo: 'update', versao: u.ultima }
+      }] });
+    }).then(function() {
+      return dbPut('preferencias', { key: 'updateNotificado', value: u.ultima });
+    });
+  }).catch(function(e) { diag('update: notificação falhou', e); });
+}
+
+function cancelarNotifUpdate() {
+  var LN = pluginLN();
+  if (!capNativo() || !LN) return;
+  LN.cancel({ notifications: [{ id: NOTIF_UPDATE_ID }] }).catch(function() {});
+}
+
+/* App que fica dias aberto em segundo plano nunca passaria pelo boot de
+   novo: ao voltar pra frente, checa outra vez — no máximo a cada 6 h. */
+var _ultimaChecagemUpdate = 0;
+function checarAtualizacaoAoVoltar() {
+  var App = pluginApp();
+  if (!App || typeof App.addListener !== 'function') return;
+  App.addListener('appStateChange', function(st) {
+    if (!st || !st.isActive) return;
+    if (Date.now() - _ultimaChecagemUpdate < 6 * 3600 * 1000) return;
+    _ultimaChecagemUpdate = Date.now();
+    checarAtualizacao();
   });
 }
 
@@ -5615,7 +5700,11 @@ openDB().then(function() {
   dispararNotificacoesLocais();
   registrarBotaoVoltar();
   organizarPdfsEmPastas();
+  /* listener antes da checagem: o toque no aviso pode ter sido o que abriu o app */
+  prepararNotifUpdate();
+  _ultimaChecagemUpdate = Date.now();
   checarAtualizacao();
+  checarAtualizacaoAoVoltar();
   diag('boot: app pronto · nativo=' + capNativo() + ' · IndexedDB=' + (_dbOk ? 'ok' : 'INDISPONÍVEL')
      + ' · plugins=[' + diagPlugins() + ']');
   sincronizarContatos();
