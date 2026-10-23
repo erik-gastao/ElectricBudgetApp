@@ -135,3 +135,18 @@ jobs:
 
             App offline-first: funciona sem internet após o primeiro uso.
             Também disponível como PWA: https://erik-gastao.github.io/ElectricBudgetApp/
+
+      # Ponto de recuperação: cada release ganha a branch release/vX.Y.Z no
+      # commit da tag, criada só depois do build passar. Se a main quebrar,
+      # dá para voltar ou corrigir a partir daqui (hotfix na branch + nova
+      # tag). Não sobrescreve uma branch que já exista.
+      - name: Criar branch da release
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          BRANCH="release/${GITHUB_REF_NAME}"
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null; then
+            echo "$BRANCH já existe — mantida como está"
+          else
+            git push origin "${GITHUB_SHA}:refs/heads/${BRANCH}"
+            echo "criada $BRANCH em ${GITHUB_SHA}"
+          fi

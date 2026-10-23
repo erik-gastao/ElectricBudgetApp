@@ -84,6 +84,13 @@ confirmação final do instalador é do Android e não pode ser pulada.
 eles não baterem. Mexa em `minima` só quando a troca for mesmo obrigatória
 (migração de dados, correção crítica, mudança no formato do backup).
 
+**Branch por release:** depois que o APK é publicado, o CI cria a branch
+`release/vX.Y.Z` no commit da tag — é o ponto de recuperação daquela versão.
+Para corrigir uma release sem levar o que já entrou na main, faça a correção
+nessa branch e marque uma tag nova a partir dela. Para voltar a main a uma
+versão boa: `git checkout main && git reset --hard release/vX.Y.Z` (só com
+certeza, apaga o que veio depois) ou `git revert` dos commits ruins.
+
 📄 [Exemplo de PDF gerado pelo app](docs/orcamento-exemplo.pdf)
 
 ## 🏗 Arquitetura
